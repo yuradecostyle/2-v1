@@ -42,14 +42,13 @@
 
 ## Встановлення для нового клієнта
 
-### Вимоги
-- **Node.js 20+** (перевірено на Node 22 / 26)
-- **PostgreSQL 15+** (рекомендовано для production) або вбудована **PGlite** для швидкого старту без окремої БД.
+📘 **Повна покрокова інструкція встановлення новим клієнтам (VPS Ubuntu + PostgreSQL + Nginx + HTTPS + systemd + чекліст запуску та бекапів):**
+👉 [**INSTALL_CLIENT.md**](./INSTALL_CLIENT.md)
 
-### Кроки розгортання
+### Швидкий старт (локально)
 ```bash
 # 1. Клонування базової версії v1.0.0
-git clone <URL_ВАШОГО_РЕПОЗИТОРІЮ> 2c-client
+git clone --branch v1.0.0 https://github.com/yuradecostyle/2-v1.git 2c-client
 cd 2c-client
 
 # 2. Встановлення залежностей
@@ -69,11 +68,7 @@ npm run dev:web   # Web UI:     http://127.0.0.1:5173
 ```
 
 ### Запуск у production
-```bash
-npm run build
-npm --workspace @bas-alt/api run start
-# Зібрана статика фронтенду знаходиться у apps/web/dist/ (роздається через Nginx/Caddy із проксі /api -> :4000)
-```
+Детальна конфігурація PostgreSQL, `systemd`, `Nginx` і SSL-сертифіката — у [**INSTALL_CLIENT.md**](./INSTALL_CLIENT.md).
 
 ---
 
