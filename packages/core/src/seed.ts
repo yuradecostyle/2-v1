@@ -1249,3 +1249,90 @@ export async function seedDemoData(db: AppDb): Promise<{ seeded: boolean; organi
 
   return { seeded: true, organizationId: org.id };
 }
+
+/**
+ * Чиста ініціалізація для production-клієнтів (SEED_DEMO_DATA=false):
+ * - План рахунків Мінфіну №291
+ * - Базові статті РГК та види цін
+ * - 1 стартова організація (без жодних тестових документів, товарів, клієнтів, кадрів чи CRM-лідів)
+ */
+export async function ensureCleanBaseData(
+  db: AppDb,
+  options?: { orgName?: string }
+): Promise<{ organizationId: string }> {
+  await ensureChartOfAccounts(db);
+
+  const existingCf = await db.select({ id: cashflowCategories.id }).from(cashflowCategories).limit(1);
+  if (existingCf.length === 0) {
+    await db.insert(cashflowCategories).values([
+      { name: 'Оплата від покупців', direction: 'IN', isOperatingExpense: false },
+      { name: 'Оплата постачальникам за товар', direction: 'OUT', isOperatingExpense: false },
+      { name: 'Оренда приміщення / складу', direction: 'OUT', isOperatingExpense: true },
+      { name: 'Зарплата та податки', direction: 'OUT', isOperatingExpense: true },
+      { name: 'Логістика та доставка', direction: 'OUT', isOperatingExpense: true },
+      { name: 'Маркетинг і реклама', direction: 'OUT', isOperatingExpense: true },
+      { name: 'Інші операційні витрати', direction: 'OUT', isOperatingExpense: true },
+    ]);
+  }
+
+  const existingPt = await db.select({ id: priceTypes.id }).from(priceTypes).limit(1);
+  if (existingPt.length === 0) {
+    await db.insert(priceTypes).values([
+      { code: 'ROZN', name: 'Роздрібна ціна (UAH)', currency: 'UAH' },
+      { code: 'OPT', name: 'Оптова ціна (UAH)', currency: 'UAH' },
+      { code: 'ZAKUP', name: 'Закупівельна ціна (UAH)', currency: 'UAH' },
+    ]);
+  }
+
+  const existingOrgs = await db.select().from(organizations).limit(1);
+  if (existingOrgs.length > 0) {
+    return { organizationId: existingOrgs[0].id };
+  }
+
+  const orgName = options?.orgName?.trim() || 'Моя компанія';
+  const [org] = await db
+    .insert(organizations)
+    .values({
+      name: orgName,
+      entityType: 'TOV',
+      taxSystem: 'GENERAL_VAT',
+      edrpou: '',
+      ipn: '',
+      iban: '',
+      bankName: '',
+      address: '',
+      directorName: '',
+      isVatPayer: true,
+      vatRate: 20,
+      baseCurrency: 'UAH',
+      costingMethod: 'FIFO',
+      allowNegativeStock: false,
+    })
+    .returning();
+
+  await db.insert(warehouses).values({
+    organizationId: org.id,
+    code: 'WH-01',
+    name: 'Основний склад',
+    type: 'WHOLESALE',
+  });
+
+  await db.insert(cashAccounts).values([
+    {
+      organizationId: org.id,
+      name: 'Основний рахунок (Банк)',
+      accountType: 'BANK',
+      iban: '',
+      currency: 'UAH',
+    },
+    {
+      organizationId: org.id,
+      name: 'Основна каса (Готівка)',
+      accountType: 'CASH',
+      iban: '',
+      currency: 'UAH',
+    },
+  ]);
+
+  return { organizationId: org.id };
+}

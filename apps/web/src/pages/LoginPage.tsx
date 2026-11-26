@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Lock,
   User,
@@ -34,6 +34,14 @@ export function LoginPage({ onSuccess }: Props) {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/health')
+      .then((r) => r.json())
+      .then((d) => setDemoMode(Boolean(d?.demoMode)))
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -186,7 +194,8 @@ export function LoginPage({ onSuccess }: Props) {
           </button>
         </form>
 
-        {/* Quick starter credentials helper */}
+        {/* Quick starter credentials helper (shown only in DEMO mode) */}
+        {demoMode && (
         <div
           className="space-y-2.5 p-4"
           style={{
@@ -229,6 +238,7 @@ export function LoginPage({ onSuccess }: Props) {
             особисті логіни/паролі для кожного працівника.
           </p>
         </div>
+        )}
       </div>
     </div>
   );

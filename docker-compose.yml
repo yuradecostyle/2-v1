@@ -26,6 +26,8 @@ services:
       HOST: 0.0.0.0
       PORT: 4000
       DATABASE_URL: postgres://${POSTGRES_USER:-erp2c}:${POSTGRES_PASSWORD:-ChangeMeStrongDbPass2026}@db:5432/${POSTGRES_DB:-erp2c}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      INIT_ORG_NAME: ${INIT_ORG_NAME:-Моя компанія}
       ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
     healthcheck:

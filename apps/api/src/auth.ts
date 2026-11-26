@@ -215,8 +215,10 @@ export async function revokeAllUserSessions(db: AppDb, userId: string): Promise<
 
 export async function ensureDefaultAccessGroupsAndUsers(
   db: AppDb,
-  defaultOrgId: string
+  defaultOrgId: string,
+  options?: { seedDemoUsers?: boolean }
 ): Promise<void> {
+  const seedDemoUsers = options?.seedDemoUsers ?? true;
   // 1. Seed 5 built-in Access Groups if missing
   let groups = await db.select().from(accessGroups).orderBy(asc(accessGroups.createdAt));
   const defaultGroupSpecs: Array<{
@@ -330,20 +332,22 @@ export async function ensureDefaultAccessGroupsAndUsers(
     }
   }
 
-  // Ensure a starter Purchase Manager account exists for quick testing
-  const globalUsers = await db.select().from(appUsers);
-  if (!globalUsers.some((u) => u.login.toLowerCase() === 'zakup')) {
-    await db.insert(appUsers).values({
-      organizationId: defaultOrgId,
-      accessGroupId: groupByRole.get('PURCHASE_MANAGER') ?? null,
-      fullName: 'Бондар Ігор (Менеджер із закупівель)',
-      login: 'zakup',
-      email: 'zakup@2c.ua',
-      passwordHash: hashPassword('zakup123'),
-      role: 'PURCHASE_MANAGER',
-      allowedOrgIdsJson: '[]',
-      isActive: true,
-    });
+  // Ensure a starter Purchase Manager account exists only in demo mode
+  if (seedDemoUsers) {
+    const globalUsers = await db.select().from(appUsers);
+    if (!globalUsers.some((u) => u.login.toLowerCase() === 'zakup')) {
+      await db.insert(appUsers).values({
+        organizationId: defaultOrgId,
+        accessGroupId: groupByRole.get('PURCHASE_MANAGER') ?? null,
+        fullName: 'Бондар Ігор (Менеджер із закупівель)',
+        login: 'zakup',
+        email: 'zakup@2c.ua',
+        passwordHash: hashPassword('zakup123'),
+        role: 'PURCHASE_MANAGER',
+        allowedOrgIdsJson: '[]',
+        isActive: true,
+      });
+    }
   }
 }
 
@@ -371,7 +375,11 @@ function defaultDeptCodeForDocType(docType: DocumentType): 'HQ' | 'SALES' | 'PUR
   }
 }
 
-export async function ensureDefaultDepartments(db: AppDb): Promise<void> {
+export async function ensureDefaultDepartments(
+  db: AppDb,
+  options?: { seedDemoDepartments?: boolean }
+): Promise<void> {
+  const seedDemoDepartments = options?.seedDemoDepartments ?? true;
   const allOrgs = await db.select().from(organizations).orderBy(asc(organizations.createdAt));
 
   for (const org of allOrgs) {
@@ -382,8 +390,17 @@ export async function ensureDefaultDepartments(db: AppDb): Promise<void> {
       .orderBy(asc(departments.createdAt));
 
     if (orgDepts.length === 0) {
-      const specs =
-        org.entityType === 'FOP'
+      const specs = !seedDemoDepartments
+        ? [
+            {
+              code: 'MAIN',
+              name: 'Головний офіс',
+              description: 'Основний підрозділ компанії',
+              headName: org.directorName || '',
+              address: org.address || '',
+            },
+          ]
+        : org.entityType === 'FOP'
           ? [
               {
                 code: 'MAIN',
@@ -555,6 +572,8 @@ export async function ensureDefaultDepartments(db: AppDb): Promise<void> {
       }
     }
   }
+
+  if (!seedDemoDepartments) return;
 
   // Ensure built-in demo accounts are anchored to the primary TOV org with 4 distinct subdivisions
   const primaryTov = allOrgs.find((o) => o.entityType === 'TOV') ?? allOrgs[0];

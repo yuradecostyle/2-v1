@@ -20,6 +20,7 @@ import {
 } from './auth.js';
 import {
   createDatabase,
+  ensureCleanBaseData,
   seedDemoData,
   seedStage4DemoData,
   organizations,
@@ -108,6 +109,7 @@ import {
 
 const PORT = Number(process.env.PORT ?? 4000);
 const HOST = process.env.HOST ?? '127.0.0.1';
+const SEED_DEMO_DATA = process.env.SEED_DEMO_DATA !== 'false';
 const DATA_DIR = process.env.PGLITE_DATA_DIR ?? path.resolve(process.cwd(), '../../data/pglite');
 
 mkdirSync(DATA_DIR, { recursive: true });
@@ -118,8 +120,17 @@ const dbHandle = await createDatabase({
 });
 
 const { db } = dbHandle;
-const { organizationId: defaultOrgId } = await seedDemoData(db);
-await seedStage4DemoData(db, defaultOrgId);
+let defaultOrgId: string;
+if (SEED_DEMO_DATA) {
+  const seeded = await seedDemoData(db);
+  defaultOrgId = seeded.organizationId;
+  await seedStage4DemoData(db, defaultOrgId);
+} else {
+  const clean = await ensureCleanBaseData(db, {
+    orgName: process.env.INIT_ORG_NAME,
+  });
+  defaultOrgId = clean.organizationId;
+}
 
 async function provisionOrganizationDefaults(params: {
   organizationId: string;
@@ -319,9 +330,11 @@ async function ensureDemoSecondFop() {
   }
 }
 
-await ensureDemoSecondFop();
-await ensureDefaultAccessGroupsAndUsers(db, defaultOrgId);
-await ensureDefaultDepartments(db);
+if (SEED_DEMO_DATA) {
+  await ensureDemoSecondFop();
+}
+await ensureDefaultAccessGroupsAndUsers(db, defaultOrgId, { seedDemoUsers: SEED_DEMO_DATA });
+await ensureDefaultDepartments(db, { seedDemoDepartments: SEED_DEMO_DATA });
 
 type AuthedRequest = FastifyRequest & { authUser?: AuthUserDto; authToken?: string };
 
@@ -1155,8 +1168,9 @@ app.delete('/api/users/:id', async (req: AuthedRequest, reply) => {
 
 app.get('/api/health', async () => ({
   status: 'ok',
-  version: '4.0.0',
+  version: '1.0.0',
   driver: dbHandle.driver,
+  demoMode: SEED_DEMO_DATA,
   timestamp: new Date().toISOString(),
 }));
 
