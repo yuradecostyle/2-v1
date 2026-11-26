@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { X, Search, ArrowRight, Sparkles } from 'lucide-react';
+import { X, Search, ArrowRight, Sparkles, Plus, SlidersHorizontal } from 'lucide-react';
+import type { DocumentType } from '../lib/api';
 import { type MenuSection, type MenuSubItem } from '../lib/menuConfig';
 import { OverlayDialog } from './OverlayDialog';
 
@@ -8,6 +9,8 @@ interface Props {
   activeItemId?: string | null;
   onSelectItem: (section: MenuSection, groupTitle: string, item: MenuSubItem) => void;
   onOpenSectionDefault: (section: MenuSection) => void;
+  onQuickCreateDoc?: (docType: DocumentType) => void;
+  onOpenMenuSettings?: () => void;
   onClose: () => void;
 }
 
@@ -16,6 +19,8 @@ export function SectionMegaMenuModal({
   activeItemId,
   onSelectItem,
   onOpenSectionDefault,
+  onQuickCreateDoc,
+  onOpenMenuSettings,
   onClose,
 }: Props) {
   const [filter, setFilter] = useState('');
@@ -91,6 +96,27 @@ export function SectionMegaMenuModal({
                 />
               </div>
 
+              {onOpenMenuSettings && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    requestClose();
+                    window.setTimeout(onOpenMenuSettings, 10);
+                  }}
+                  title="Налаштувати пункти цього меню"
+                  className="inline-flex min-h-[44px] items-center gap-1.5 px-3.5 text-[12px] font-bold transition"
+                  style={{
+                    borderRadius: 'var(--r-pill)',
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border-strong)',
+                    color: 'var(--text-2)',
+                  }}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span className="hidden sm:inline">Налаштувати меню</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
@@ -163,33 +189,62 @@ export function SectionMegaMenuModal({
                       {group.items.map((item) => {
                         const isCurrent = item.id === activeItemId;
                         const isDirectCore = item.target.kind !== 'module';
+                        const docTypeToCreate =
+                          item.target.kind === 'documents' && item.target.docType
+                            ? (item.target.docType as DocumentType)
+                            : null;
                         return (
-                          <button
+                          <div
                             key={item.id}
-                            type="button"
-                            onClick={() => {
-                              requestClose();
-                              window.setTimeout(
-                                () => onSelectItem(section, group.title, item),
-                                10
-                              );
-                            }}
-                            className="group flex min-h-[38px] w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[13.5px] font-semibold transition"
+                            className="flex items-center gap-1"
                             style={{
                               borderRadius: 'var(--r-sm)',
                               background: isCurrent ? 'var(--primary-soft)' : 'transparent',
-                              color: isCurrent ? 'var(--primary-ink)' : 'var(--text)',
                             }}
                           >
-                            <span className="min-w-0 truncate">{item.label}</span>
-                            {isDirectCore && (
-                              <Sparkles
-                                className="h-3.5 w-3.5 shrink-0 opacity-60"
-                                style={{ color: 'var(--primary)' }}
-                                aria-hidden="true"
-                              />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                requestClose();
+                                window.setTimeout(
+                                  () => onSelectItem(section, group.title, item),
+                                  10
+                                );
+                              }}
+                              className="group flex min-h-[38px] min-w-0 flex-1 items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[13.5px] font-semibold transition"
+                              style={{
+                                color: isCurrent ? 'var(--primary-ink)' : 'var(--text)',
+                              }}
+                            >
+                              <span className="min-w-0 truncate">{item.label}</span>
+                              {!docTypeToCreate && isDirectCore && (
+                                <Sparkles
+                                  className="h-3.5 w-3.5 shrink-0 opacity-60"
+                                  style={{ color: 'var(--primary)' }}
+                                  aria-hidden="true"
+                                />
+                              )}
+                            </button>
+                            {docTypeToCreate && onQuickCreateDoc && (
+                              <button
+                                type="button"
+                                title={`Створити «${item.label}» у спливаючому вікні`}
+                                aria-label={`Створити ${item.label}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  requestClose();
+                                  window.setTimeout(() => onQuickCreateDoc(docTypeToCreate), 10);
+                                }}
+                                className="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition"
+                                style={{
+                                  background: 'var(--primary-soft)',
+                                  color: 'var(--primary-ink)',
+                                }}
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                              </button>
                             )}
-                          </button>
+                          </div>
                         );
                       })}
                     </div>

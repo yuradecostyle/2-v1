@@ -19,22 +19,47 @@ import {
   Building2,
   Share2,
   Percent,
+  SlidersHorizontal,
+  Printer,
+  PackageCheck,
 } from 'lucide-react';
 import {
   apiFetch,
+  canAccessDocType,
   DOC_TYPE_META,
   fmtDate,
   fmtMoney,
   fmtQty,
+  ORDER_STATUS_META,
   TAX_SYSTEM_LABELS,
   type BootstrapData,
+  type DocTypeFieldSettings,
   type DocumentFull,
   type DocumentLineDto,
+  type DocumentMetaDto,
+  type DocumentSummary,
   type DocumentType,
 } from '../lib/api';
 import { SmartCounterpartyCombobox } from './SmartCounterpartyCombobox';
 import { SmartItemCombobox } from './SmartItemCombobox';
 import { ShareDocumentModal } from './ShareDocumentModal';
+import { PrintableDocumentModal } from './PrintableDocumentModal';
+
+const SWITCHABLE_DOC_TYPES: DocumentType[] = [
+  'customer_order',
+  'sales_invoice',
+  'goods_receipt',
+  'money_in',
+  'money_out',
+  'stock_transfer',
+  'inventory_count',
+  'production_order',
+  'payroll_sheet',
+  'tax_invoice',
+  'price_setting',
+  'manual_journal',
+  'opening_balance',
+];
 
 interface ActiveOrder {
   id: string;
@@ -118,7 +143,111 @@ export function DocumentEditorModal({
     bootstrap.warehouses[1]?.id ?? bootstrap.warehouses[0]?.id ?? ''
   );
   const [counterpartyId, setCounterpartyId] = useState<string>(initialCounterpartyId ?? '');
+  const [contractId, setContractId] = useState<string>('');
   const [cashAccountId, setCashAccountId] = useState<string>(bootstrap.cashAccounts[0]?.id ?? '');
+
+  // BAS Малий бізнес додаткові поля документа (meta)
+  const [docMeta, setDocMeta] = useState<DocumentMetaDto>(() => ({
+    orderStatus: 'NEW',
+    shipmentDate: '',
+    managerName: bootstrap.currentUser?.fullName ?? '',
+    projectName: '',
+    deliveryMethod: '',
+    deliveryAddress: '',
+    ttnNumber: '',
+    paymentTerms: '',
+    allowNegativeStock:
+      initialDocType === 'customer_order'
+        ? Boolean(bootstrap.basSettings?.features?.allowOrderWithoutStock ?? true)
+        : false,
+    customFields: {},
+  }));
+  const [fieldCfgOpen, setFieldCfgOpen] = useState(false);
+  const [localFieldCfg, setLocalFieldCfg] = useState<DocTypeFieldSettings | null>(null);
+  const [savingFieldCfg, setSavingFieldCfg] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [loadedSummary, setLoadedSummary] = useState<DocumentSummary | null>(null);
+
+  const basFeatures = bootstrap.basSettings?.features;
+  const activeFieldCfg =
+    localFieldCfg ?? bootstrap.basSettings?.docFields?.[docType] ?? null;
+
+  useEffect(() => {
+    const serverCfg = bootstrap.basSettings?.docFields?.[docType];
+    if (serverCfg) {
+      setLocalFieldCfg(structuredClone(serverCfg));
+    } else {
+      setLocalFieldCfg(null);
+    }
+  }, [bootstrap.basSettings, docType]);
+
+  const fieldMeta = (key: string, defaultLabel: string, defaultVisible = true) => {
+    const found = activeFieldCfg?.fields.find((f) => f.key === key);
+    if (!found) return { visible: defaultVisible, required: false, label: defaultLabel };
+    return found;
+  };
+  const isFieldVisible = (key: string, defaultVisible = true): boolean => {
+    if (key === 'contractId' && basFeatures?.useContracts === false) return false;
+    if (key === 'orderStatus' && basFeatures?.useOrderStatuses === false) return false;
+    if (key === 'projectName' && basFeatures?.useProjects === false) return false;
+    if (
+      (key === 'deliveryMethod' || key === 'deliveryAddress' || key === 'ttnNumber') &&
+      basFeatures?.useDeliveryAndTtn === false
+    ) {
+      return false;
+    }
+    if (key === 'lineDiscount' && basFeatures?.useDiscounts === false) return false;
+    return fieldMeta(key, '', defaultVisible).visible;
+  };
+  const fieldLabel = (key: string, fallback: string): string => {
+    const m = fieldMeta(key, fallback, true);
+    return `${m.label}${m.required ? ' *' : ''}`;
+  };
+
+  const counterpartyContracts = bootstrap.contracts.filter(
+    (c) => !counterpartyId || c.counterpartyId === counterpartyId
+  );
+
+  const handleQuickCreateContract = async () => {
+    if (!counterpartyId) {
+      setError('Спочатку оберіть контрагента, щоб створити договір.');
+      return;
+    }
+    const created = await apiFetch<{ id: string }>('/api/catalogs/contracts', {
+      method: 'POST',
+      body: JSON.stringify({
+        counterpartyId,
+        name: `Договір №${String(Date.now()).slice(-4)} від ${new Date().toLocaleDateString('uk-UA')}`,
+        currency: 'UAH',
+        contractType: docType === 'goods_receipt' || docType === 'money_out' ? 'SUPPLIER' : 'CUSTOMER',
+      }),
+    });
+    setContractId(created.id);
+    qc.invalidateQueries({ queryKey: ['bootstrap'] });
+    setInfoMsg('Новий договір створено та прив’язано до документа');
+  };
+
+  const saveQuickFieldConfig = async () => {
+    if (!localFieldCfg) return;
+    setSavingFieldCfg(true);
+    try {
+      await apiFetch('/api/bas-settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          docFields: {
+            [docType]: localFieldCfg,
+          },
+        }),
+      });
+      await qc.invalidateQueries({ queryKey: ['bootstrap'] });
+      setFieldCfgOpen(false);
+      setInfoMsg(`Поля документа «${DOC_TYPE_META[docType].short}» оновлено та збережено!`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSavingFieldCfg(false);
+    }
+  };
 
   const selectedOrg =
     bootstrap.organizations.find((o) => o.id === docOrgId) ?? bootstrap.organization;
@@ -174,7 +303,9 @@ export function DocumentEditorModal({
   const isManualJournal = docType === 'manual_journal';
   const isOrderDoc = docType === 'customer_order';
   const hasDiscountSupport =
-    docType === 'customer_order' || docType === 'sales_invoice' || isTaxInvoiceDoc;
+    (docType === 'customer_order' || docType === 'sales_invoice' || isTaxInvoiceDoc) &&
+    isFieldVisible('lineDiscount', true);
+  const showLineNotes = isFieldVisible('lineNotes', false);
   const isTradeDoc =
     docType === 'goods_receipt' || docType === 'sales_invoice' || isOrderDoc || isTaxInvoiceDoc;
 
@@ -295,11 +426,20 @@ export function DocumentEditorModal({
       setWarehouseId(doc.warehouseId ?? '');
       setTargetWarehouseId(doc.targetWarehouseId ?? '');
       setCounterpartyId(doc.counterpartyId ?? '');
+      setContractId(doc.contractId ?? '');
       setCashAccountId(doc.cashAccountId ?? '');
       setCashflowCategoryId(doc.cashflowCategoryId ?? '');
       setPriceTypeId(doc.priceTypeId ?? '');
       setTotalAmount(doc.totalAmount);
       setComment(doc.comment);
+      setLoadedSummary(doc);
+      if (doc.meta && typeof doc.meta === 'object') {
+        setDocMeta((prev) => ({
+          ...prev,
+          ...doc.meta,
+          customFields: { ...(doc.meta?.customFields ?? {}) },
+        }));
+      }
       setLines(doc.lines);
     });
   }, [currentDocId]);
@@ -516,6 +656,47 @@ export function DocumentEditorModal({
   const handleSubmit = async (autoPost: boolean, closeAfter = true) => {
     setError(null);
     setInfoMsg(null);
+
+    // Перевірка обов’язкових полів, заданих у конструкторі BAS Малий бізнес
+    if (activeFieldCfg) {
+      const valueMap: Record<string, string | undefined> = {
+        docNumber,
+        docDate,
+        counterpartyId,
+        contractId,
+        warehouseId,
+        targetWarehouseId,
+        cashAccountId,
+        cashflowCategoryId,
+        priceTypeId,
+        departmentId: docDeptId,
+        orderStatus: docMeta.orderStatus,
+        shipmentDate: docMeta.shipmentDate,
+        managerName: docMeta.managerName,
+        projectName: docMeta.projectName,
+        deliveryMethod: docMeta.deliveryMethod,
+        deliveryAddress: docMeta.deliveryAddress,
+        ttnNumber: docMeta.ttnNumber,
+        paymentTerms: docMeta.paymentTerms,
+        comment,
+      };
+      for (const fld of activeFieldCfg.fields) {
+        if (fld.visible && fld.required && fld.group !== 'line') {
+          const val = (valueMap[fld.key] ?? '').trim();
+          if (!val) {
+            setError(`Заповніть обов’язкове поле «${fld.label}»`);
+            return;
+          }
+        }
+      }
+      for (const cf of activeFieldCfg.customFields) {
+        if (cf.required && !(docMeta.customFields?.[cf.id] ?? '').trim()) {
+          setError(`Заповніть обов’язкове додаткове поле «${cf.label}»`);
+          return;
+        }
+      }
+    }
+
     setSaving(true);
     try {
       const needsWarehouse =
@@ -538,12 +719,14 @@ export function DocumentEditorModal({
         targetWarehouseId:
           isTransferDoc || isProductionDoc ? targetWarehouseId || warehouseId || null : null,
         counterpartyId: isTradeDoc || isCashDoc ? counterpartyId || null : null,
+        contractId: isTradeDoc || isCashDoc ? contractId || null : null,
         cashAccountId: isCashDoc ? cashAccountId || null : null,
         cashflowCategoryId: isCashDoc ? cashflowCategoryId || null : null,
         priceTypeId:
           isPriceDoc || docType === 'sales_invoice' || isOrderDoc ? priceTypeId || null : null,
         totalAmount: isCashDoc ? Number(totalAmount) : undefined,
         comment,
+        meta: docMeta,
         lines: isCashDoc ? [] : lines,
         autoPost,
       };
@@ -561,6 +744,7 @@ export function DocumentEditorModal({
         });
         setCurrentDocId(savedDoc.id);
       }
+      setLoadedSummary(savedDoc);
       onSaved();
       qc.invalidateQueries({ queryKey: ['doc-relations', savedDoc.id] });
       if (closeAfter) {
@@ -635,30 +819,81 @@ export function DocumentEditorModal({
       <div className="animate-modal-in flex max-h-[92vh] w-full max-w-5xl flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl">
         {/* Modal Header + Tabs */}
         <div className="border-b border-slate-200 px-6 pt-4 pb-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <span
                   className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${DOC_TYPE_META[docType].color}`}
                 >
                   {DOC_TYPE_META[docType].short}
                 </span>
-                <h2 className="font-display text-base font-bold text-slate-900">
-                  {currentDocId
-                    ? `${DOC_TYPE_META[docType].label} №${docNumber || '...'}`
-                    : `Новий документ: ${DOC_TYPE_META[docType].label}`}
-                </h2>
+                {!currentDocId ? (
+                  <select
+                    value={docType}
+                    onChange={(e) => {
+                      const nextDt = e.target.value as DocumentType;
+                      setDocType(nextDt);
+                      setLines([]);
+                      setDocMeta((m) => ({
+                        ...m,
+                        allowNegativeStock:
+                          nextDt === 'customer_order'
+                            ? Boolean(basFeatures?.allowOrderWithoutStock ?? true)
+                            : false,
+                      }));
+                    }}
+                    aria-label="Тип документа"
+                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 font-display text-sm font-bold text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  >
+                    {SWITCHABLE_DOC_TYPES.filter((dt) =>
+                      canAccessDocType(bootstrap.currentUser?.effectivePermissions, dt)
+                    ).map((dt) => (
+                      <option key={dt} value={dt}>
+                        Новий: {DOC_TYPE_META[dt].label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <h2 className="font-display text-base font-bold text-slate-900">
+                    {`${DOC_TYPE_META[docType].label} №${docNumber || '...'}`}
+                  </h2>
+                )}
               </div>
               <p className="mt-0.5 text-xs text-slate-500">
-                Швидкий пошук клієнтів і товарів зі створенням на льоту · Зв’язки та історія змін
+                Повна картка документа BAS Малий бізнес · Редагування полів, знижки, зв’язки та друк
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setFieldCfgOpen((v) => !v)}
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition"
+                style={{
+                  background: fieldCfgOpen ? 'var(--primary-soft)' : 'var(--surface-2)',
+                  color: fieldCfgOpen ? 'var(--primary-ink)' : 'var(--text-2)',
+                  border: fieldCfgOpen ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
+                }}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" /> Поля
+              </button>
+              {currentDocId && loadedSummary && (
+                <button
+                  type="button"
+                  onClick={() => setPrintOpen(true)}
+                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition"
+                  style={{
+                    background: 'var(--info-soft)',
+                    color: 'var(--info-ink)',
+                  }}
+                >
+                  <Printer className="h-3.5 w-3.5" /> Друк / PDF
+                </button>
+              )}
               {currentDocId && (
                 <button
                   type="button"
                   onClick={() => setShareOpen(true)}
-                  className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200 hover:bg-emerald-100"
+                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200 hover:bg-emerald-100"
                 >
                   <Share2 className="h-3.5 w-3.5" /> Поділитися
                 </button>
@@ -672,6 +907,65 @@ export function DocumentEditorModal({
               </button>
             </div>
           </div>
+
+          {/* Швидкий конструктор полів прямо в шапці документа */}
+          {fieldCfgOpen && localFieldCfg && (
+            <div
+              className="mt-3 space-y-2.5 rounded-xl p-3.5 text-xs"
+              style={{
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border-strong)',
+              }}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-extrabold" style={{ color: 'var(--text)' }}>
+                  Виберіть потрібні поля для «{DOC_TYPE_META[docType].label}»:
+                </div>
+                <button
+                  type="button"
+                  disabled={savingFieldCfg}
+                  onClick={saveQuickFieldConfig}
+                  className="inline-flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-extrabold"
+                  style={{ background: 'var(--primary)', color: 'var(--surface)' }}
+                >
+                  <Save className="h-3.5 w-3.5" /> Зберегти вибір
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {localFieldCfg.fields.map((fld) => (
+                  <label
+                    key={fld.key}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1 font-semibold"
+                    style={{
+                      background: fld.visible ? 'var(--primary-soft)' : 'var(--surface)',
+                      color: fld.visible ? 'var(--primary-ink)' : 'var(--muted)',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={fld.visible}
+                      onChange={(e) =>
+                        setLocalFieldCfg((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                fields: prev.fields.map((item) =>
+                                  item.key === fld.key
+                                    ? { ...item, visible: e.target.checked }
+                                    : item
+                                ),
+                              }
+                            : prev
+                        )
+                      }
+                    />
+                    <span>{fld.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Document Tabs */}
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -1032,16 +1326,294 @@ export function DocumentEditorModal({
                 )}
               </div>
 
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Коментар</label>
-                <input
-                  type="text"
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  placeholder="Призначення операції або примітка..."
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-                />
+              {/* ДОГОВІР ТА ДОДАТКОВІ РЕКВІЗИТИ BAS МАЛИЙ БІЗНЕС (НАЛАШТОВУВАНІ ПОЛЯ) */}
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                {(isTradeDoc || isCashDoc) && isFieldVisible('contractId', true) && (
+                  <div>
+                    <div className="mb-1 flex items-center justify-between">
+                      <label className="text-xs font-medium text-slate-600">
+                        {fieldLabel('contractId', 'Договір')}
+                      </label>
+                      {counterpartyId && (
+                        <button
+                          type="button"
+                          onClick={handleQuickCreateContract}
+                          className="text-[11px] font-bold"
+                          style={{ color: 'var(--primary)' }}
+                        >
+                          + Новий договір
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={contractId}
+                      onChange={(e) => setContractId(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    >
+                      <option value="">— Основний договір —</option>
+                      {counterpartyContracts.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.currency})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {isOrderDoc && isFieldVisible('orderStatus', true) && (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      {fieldLabel('orderStatus', 'Стан замовлення')}
+                    </label>
+                    <select
+                      value={docMeta.orderStatus ?? 'NEW'}
+                      onChange={(e) =>
+                        setDocMeta((m) => ({
+                          ...m,
+                          orderStatus: e.target.value as DocumentMetaDto['orderStatus'],
+                        }))
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold"
+                    >
+                      {(Object.keys(ORDER_STATUS_META) as Array<keyof typeof ORDER_STATUS_META>).map(
+                        (st) => (
+                          <option key={st} value={st}>
+                            {ORDER_STATUS_META[st].label}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </div>
+                )}
+
+                {isOrderDoc && isFieldVisible('shipmentDate', true) && (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      {fieldLabel('shipmentDate', 'Планова дата відвантаження')}
+                    </label>
+                    <input
+                      type="date"
+                      value={docMeta.shipmentDate ?? ''}
+                      onChange={(e) =>
+                        setDocMeta((m) => ({ ...m, shipmentDate: e.target.value }))
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('managerName', false) && (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      {fieldLabel('managerName', 'Відповідальний менеджер')}
+                    </label>
+                    <input
+                      type="text"
+                      value={docMeta.managerName ?? ''}
+                      onChange={(e) =>
+                        setDocMeta((m) => ({ ...m, managerName: e.target.value }))
+                      }
+                      placeholder="ПІБ відповідального..."
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('projectName', false) && (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      {fieldLabel('projectName', 'Проєкт / Об’єкт')}
+                    </label>
+                    <input
+                      type="text"
+                      value={docMeta.projectName ?? ''}
+                      onChange={(e) =>
+                        setDocMeta((m) => ({ ...m, projectName: e.target.value }))
+                      }
+                      placeholder="Напр. ЖК Леополь Таун / Кв. 42"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('paymentTerms', false) && (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      {fieldLabel('paymentTerms', 'Умови оплати')}
+                    </label>
+                    <select
+                      value={docMeta.paymentTerms ?? ''}
+                      onChange={(e) =>
+                        setDocMeta((m) => ({ ...m, paymentTerms: e.target.value }))
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    >
+                      <option value="">— Не вказано —</option>
+                      <option value="Передоплата 100%">Передоплата 100%</option>
+                      <option value="Аванс 50% / 50% при відвантаженні">Аванс 50% / 50% при відвантаженні</option>
+                      <option value="Післяплата при отриманні">Післяплата при отриманні</option>
+                      <option value="Відстрочка 7 днів">Відстрочка 7 днів</option>
+                      <option value="Відстрочка 14 днів">Відстрочка 14 днів</option>
+                    </select>
+                  </div>
+                )}
+
+                {isFieldVisible('deliveryMethod', false) && (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      {fieldLabel('deliveryMethod', 'Спосіб доставки')}
+                    </label>
+                    <select
+                      value={docMeta.deliveryMethod ?? ''}
+                      onChange={(e) =>
+                        setDocMeta((m) => ({ ...m, deliveryMethod: e.target.value }))
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    >
+                      <option value="">— Оберіть спосіб —</option>
+                      <option value="Самовивіз зі складу">Самовивіз зі складу</option>
+                      <option value="Нова Пошта">Нова Пошта</option>
+                      <option value="Доставка транспортом компанії">Доставка транспортом компанії</option>
+                      <option value="Кур’єр / Перевізник">Кур’єр / Перевізник</option>
+                    </select>
+                  </div>
+                )}
+
+                {isFieldVisible('deliveryAddress', false) && (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      {fieldLabel('deliveryAddress', 'Адреса доставки / Відділення НП')}
+                    </label>
+                    <input
+                      type="text"
+                      value={docMeta.deliveryAddress ?? ''}
+                      onChange={(e) =>
+                        setDocMeta((m) => ({ ...m, deliveryAddress: e.target.value }))
+                      }
+                      placeholder="Місто, вулиця або № відділення..."
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                )}
+
+                {isFieldVisible('ttnNumber', false) && (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      {fieldLabel('ttnNumber', 'Номер ТТН / Вхідний №')}
+                    </label>
+                    <input
+                      type="text"
+                      value={docMeta.ttnNumber ?? ''}
+                      onChange={(e) =>
+                        setDocMeta((m) => ({ ...m, ttnNumber: e.target.value }))
+                      }
+                      placeholder="20450..."
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm"
+                    />
+                  </div>
+                )}
+
+                {/* Користувацькі додаткові реквізити (Custom fields) */}
+                {(basFeatures?.useCustomDocFields ?? true) &&
+                  (activeFieldCfg?.customFields ?? []).map((cf) => (
+                    <div key={cf.id}>
+                      <label className="mb-1 block text-xs font-semibold text-indigo-700">
+                        {cf.label}
+                        {cf.required ? ' *' : ''}
+                      </label>
+                      {cf.type === 'select' ? (
+                        <select
+                          value={docMeta.customFields?.[cf.id] ?? ''}
+                          onChange={(e) =>
+                            setDocMeta((m) => ({
+                              ...m,
+                              customFields: {
+                                ...(m.customFields ?? {}),
+                                [cf.id]: e.target.value,
+                              },
+                            }))
+                          }
+                          className="w-full rounded-lg border border-indigo-200 px-3 py-2 text-sm"
+                        >
+                          <option value="">— Оберіть —</option>
+                          {(cf.options ?? []).map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type={cf.type}
+                          value={docMeta.customFields?.[cf.id] ?? ''}
+                          onChange={(e) =>
+                            setDocMeta((m) => ({
+                              ...m,
+                              customFields: {
+                                ...(m.customFields ?? {}),
+                                [cf.id]: e.target.value,
+                              },
+                            }))
+                          }
+                          className="w-full rounded-lg border border-indigo-200 px-3 py-2 text-sm"
+                        />
+                      )}
+                    </div>
+                  ))}
               </div>
+
+              {/* Чекбокс «Товар на замовлення — проводити в мінус без залишку на складі» */}
+              {(isOrderDoc || docType === 'sales_invoice') &&
+                isFieldVisible('allowNegativeStock', true) && (
+                  <label
+                    className="flex cursor-pointer items-center justify-between gap-3 rounded-xl px-4 py-2.5 text-xs"
+                    style={{
+                      background: docMeta.allowNegativeStock ? 'var(--pos-soft)' : 'var(--surface-2)',
+                      border: docMeta.allowNegativeStock
+                        ? '1px solid var(--pos)'
+                        : '1px solid var(--border)',
+                    }}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(docMeta.allowNegativeStock)}
+                        onChange={(e) =>
+                          setDocMeta((m) => ({ ...m, allowNegativeStock: e.target.checked }))
+                        }
+                        className="h-4 w-4"
+                      />
+                      <PackageCheck
+                        className="h-4 w-4 shrink-0"
+                        style={{ color: docMeta.allowNegativeStock ? 'var(--pos-ink)' : 'var(--muted)' }}
+                      />
+                      <span
+                        className="font-bold"
+                        style={{ color: docMeta.allowNegativeStock ? 'var(--pos-ink)' : 'var(--text)' }}
+                      >
+                        {fieldMeta('allowNegativeStock', 'Товар на замовлення — дозволити проведення в мінус без залишку на складі').label}
+                      </span>
+                    </span>
+                    <span className="hidden text-[11px] sm:inline" style={{ color: 'var(--muted)' }}>
+                      Не блокує проведення при 0 на складі
+                    </span>
+                  </label>
+                )}
+
+              {isFieldVisible('comment', true) && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">
+                    {fieldLabel('comment', 'Коментар')}
+                  </label>
+                  <input
+                    type="text"
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder="Призначення операції або примітка..."
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+              )}
 
               {/* ЗАРПЛАТА */}
               {isPayrollDoc && (
@@ -1360,13 +1932,14 @@ export function DocumentEditorModal({
                           {!isPriceDoc && !isTransferDoc && !isInventoryDoc && !isProductionDoc && (
                             <th className="w-32 px-3 py-2 text-right">Сума (₴)</th>
                           )}
+                          {showLineNotes && <th className="w-36 px-2 py-2">Примітка</th>}
                           <th className="w-10 px-2 py-2"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {lines.length === 0 && (
                           <tr>
-                            <td colSpan={hasDiscountSupport ? 8 : 7} className="px-4 py-6 text-center text-xs text-slate-400">
+                            <td colSpan={hasDiscountSupport ? 9 : 8} className="px-4 py-6 text-center text-xs text-slate-400">
                               Скористайтеся рядком пошуку вище, щоб миттєво додати товари в документ
                             </td>
                           </tr>
@@ -1472,6 +2045,17 @@ export function DocumentEditorModal({
                                     {fmtMoney(line.amount, '')}
                                   </td>
                                 )}
+                              {showLineNotes && (
+                                <td className="px-2 py-2">
+                                  <input
+                                    type="text"
+                                    value={line.notes ?? ''}
+                                    onChange={(e) => updateLine(idx, { notes: e.target.value })}
+                                    placeholder="Примітка..."
+                                    className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs"
+                                  />
+                                </td>
+                              )}
                               <td className="px-2 py-2 text-center">
                                 <button
                                   type="button"
@@ -1732,6 +2316,10 @@ export function DocumentEditorModal({
           docNumber={docNumber}
           onClose={() => setShareOpen(false)}
         />
+      )}
+
+      {printOpen && loadedSummary && (
+        <PrintableDocumentModal doc={loadedSummary} onClose={() => setPrintOpen(false)} />
       )}
     </div>
   );

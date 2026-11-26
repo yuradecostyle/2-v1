@@ -576,6 +576,19 @@ CREATE TABLE IF NOT EXISTS print_templates (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_print_templates_org_key ON print_templates(organization_id, template_key);
+
+ALTER TABLE items ADD COLUMN IF NOT EXISTS is_order_only BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS meta_json TEXT NOT NULL DEFAULT '{}';
+
+CREATE TABLE IF NOT EXISTS bas_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  features_json TEXT NOT NULL DEFAULT '{}',
+  doc_fields_json TEXT NOT NULL DEFAULT '{}',
+  menu_config_json TEXT NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bas_settings_org ON bas_settings(organization_id);
 `;
 
 export async function createDatabase(options?: {

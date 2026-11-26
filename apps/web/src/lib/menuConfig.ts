@@ -1,4 +1,6 @@
-import type { DocumentType } from './api';
+import type { BasSettingsDto, DocumentType } from './api';
+
+export type BasSettingsTabKey = 'features' | 'doc-fields' | 'menu' | 'import';
 
 export type TopSectionKey =
   | 'dashboard'
@@ -38,6 +40,7 @@ export type TargetRoute =
   | { kind: 'reports' }
   | { kind: 'assets' }
   | { kind: 'service' }
+  | { kind: 'bas-settings'; tab?: BasSettingsTabKey }
   | { kind: 'modal'; modal: 'organizations' | 'departments' | 'audit' | 'users' | 'password' | 'new-doc'; docType?: DocumentType }
   | {
       kind: 'module';
@@ -1146,138 +1149,36 @@ export const MENU_SECTIONS: MenuSection[] = [
   {
     id: 'settings',
     label: 'Налаштування',
-    subtitle: 'Адміністрування, користувачі і права RBAC, обслуговування та параметри системи',
-    defaultTarget: { kind: 'service' },
+    subtitle: 'BAS Малий бізнес: ще більше можливостей, конструктор полів документів, налаштування меню, права і сервіс',
+    defaultTarget: { kind: 'bas-settings', tab: 'features' },
     groups: [
       {
-        title: 'Налаштування',
+        title: 'Налаштування BAS Малий бізнес',
         items: [
-          {
-            id: 'set-more',
-            label: 'Ще більше можливостей',
-            target: {
-              kind: 'module',
-              description: 'Увімкнення додаткових модулів: мультивалютність НБУ, ОЗ (10/13), BOM-виробництво, ПРРО Checkbox.',
-              relatedRouteLabel: 'ОЗ і валюта',
-              relatedPage: 'assets',
-            },
-          },
-          {
-            id: 'set-missing',
-            label: 'Не знайшли потрібну можливість?',
-            target: {
-              kind: 'module',
-              description: 'Керування функціональними опціями інтерфейсу та замовлення індивідуальних доробок під ваш бізнес.',
-              relatedRouteLabel: 'Інтеграції та сервіс',
-              relatedPage: 'service',
-            },
-          },
-          { id: 'set-all-catalogs', label: 'Всі довідники', target: { kind: 'catalogs', tab: 'items' } },
+          { id: 'set-more', label: 'Ще більше можливостей (Функції)', target: { kind: 'bas-settings', tab: 'features' } },
+          { id: 'set-doc-fields', label: 'Поля документів (Конструктор)', target: { kind: 'bas-settings', tab: 'doc-fields' } },
+          { id: 'set-menu-config', label: 'Налаштування меню та підменю', target: { kind: 'bas-settings', tab: 'menu' } },
+          { id: 'set-import-hub', label: 'Імпорт товарів та покупців (PDF/XLS/CSV/XML)', target: { kind: 'bas-settings', tab: 'import' } },
+          { id: 'set-all-catalogs', label: 'Всі довідники (НДІ)', target: { kind: 'catalogs', tab: 'items' } },
         ],
       },
       {
-        title: 'Персональні налаштування',
+        title: 'Адміністрування та Доступи',
         items: [
-          { id: 'set-my', label: 'Мої налаштування', target: { kind: 'modal', modal: 'organizations' } },
-          {
-            id: 'set-google',
-            label: 'Обмін з Google',
-            target: {
-              kind: 'module',
-              description: 'Синхронізація контактів, Google Календаря та вивантаження звітів у Google Таблиці.',
-              relatedRouteLabel: 'Інтеграції',
-              relatedPage: 'service',
-            },
-          },
-          {
-            id: 'set-mail-sms',
-            label: 'Пошта і SMS',
-            target: {
-              kind: 'module',
-              description: 'Налаштування SMTP-пошти та SMS-шлюзів (TurboSMS, AlphaSMS) для автоматичних повідомлень клієнтам.',
-              relatedRouteLabel: 'Інтеграції',
-              relatedPage: 'service',
-            },
-          },
-        ],
-      },
-      {
-        title: 'Адміністрування',
-        items: [
-          { id: 'set-maint', label: 'Обслуговування', target: { kind: 'service' } },
-          { id: 'set-support', label: 'Інтернет-підтримка і сервіси', target: { kind: 'service' } },
-          { id: 'set-rbac', label: 'Налаштування користувачів і прав', target: { kind: 'modal', modal: 'users' } },
-          {
-            id: 'set-files',
-            label: 'Налаштування роботи з файлами',
-            target: {
-              kind: 'module',
-              description: 'Параметри зберігання сканів первинних документів, договорів та XML-файлів SAF-T / ЄРПН.',
-              relatedRouteLabel: 'Сервіс та обслуговування',
-              relatedPage: 'service',
-            },
-          },
-          { id: 'set-general', label: 'Загальні налаштування', target: { kind: 'modal', modal: 'organizations' } },
-          { id: 'set-data-fix', label: 'Коригування даних', target: { kind: 'service' } },
+          { id: 'set-rbac', label: 'Користувачі, групи прав і бухгалтер', target: { kind: 'modal', modal: 'users' } },
+          { id: 'set-general', label: 'Організації та ФОП', target: { kind: 'modal', modal: 'organizations' } },
+          { id: 'set-depts', label: 'Підрозділи та філії', target: { kind: 'modal', modal: 'departments' } },
           { id: 'set-print-forms', label: 'Друковані форми (10 стандартів UA)', target: { kind: 'catalogs', tab: 'templates' } },
-          {
-            id: 'set-cloud',
-            label: 'Робота в хмарі',
-            target: {
-              kind: 'module',
-              description: 'Параметри веб-доступу, резервного копіювання PostgreSQL/PGlite та підключення зовнішніх API.',
-              relatedRouteLabel: 'Сервіс та інтеграції',
-              relatedPage: 'service',
-            },
-          },
-          {
-            id: 'set-pos-hw',
-            label: 'РМК і торгове обладнання',
-            target: {
-              kind: 'module',
-              description: 'Підключення сканерів штрихкодів, принтерів чеків, етикеток та ПРРО Checkbox.',
-              relatedRouteLabel: 'Налаштувати Checkbox ПРРО',
-              relatedPage: 'service',
-            },
-          },
-        ],
-      },
-      {
-        title: 'Інтеграції',
-        items: [
-          { id: 'set-sync', label: 'Синхронізація даних', target: { kind: 'service' } },
-          { id: 'set-channels', label: 'Канали продажів', target: { kind: 'service' } },
-          { id: 'set-mailings', label: 'Пошта, розсилки і SMS', target: { kind: 'service' } },
-        ],
-      },
-      {
-        title: 'Аналітика',
-        items: [{ id: 'set-reports', label: 'Звіти', target: { kind: 'reports' } }],
-      },
-      {
-        title: 'Сервіс',
-        items: [
+          { id: 'set-maint', label: 'Обслуговування і перепроведення', target: { kind: 'service' } },
           { id: 'set-password', label: 'Змінити пароль', target: { kind: 'modal', modal: 'password' } },
-          {
-            id: 'set-delete-objs',
-            label: 'Вилучення об’єктів',
-            target: {
-              kind: 'module',
-              description: 'Контроль посилальної цілісності та безпечне очищення помічених на вилучення документів і довідників.',
-              relatedRouteLabel: 'Сервіс та регламент',
-              relatedPage: 'service',
-            },
-          },
-          {
-            id: 'set-collapse-db',
-            label: 'Згортка інформаційної бази',
-            target: {
-              kind: 'module',
-              description: 'Перерахунок місячних підсумків, перепроведення послідовності FIFO та закриття минулих періодів.',
-              relatedRouteLabel: 'Перепроведення і підсумки',
-              relatedPage: 'service',
-            },
-          },
+        ],
+      },
+      {
+        title: 'Інтеграції та Обладнання',
+        items: [
+          { id: 'set-sync', label: 'BAS OData, Monobank, Приват24', target: { kind: 'service' } },
+          { id: 'set-pos-hw', label: 'РМК та ПРРО Checkbox', target: { kind: 'service' } },
+          { id: 'set-reports', label: 'Управлінські звіти', target: { kind: 'reports' } },
         ],
       },
     ],
@@ -1302,8 +1203,86 @@ export const MENU_SECTIONS: MenuSection[] = [
         items: [
           { id: 'int-bas-odata', label: 'Прямий обмін BAS / 1С (OData)', target: { kind: 'service' } },
           { id: 'int-csv', label: 'Імпорт номенклатури (PDF / XLS / CSV / XML)', target: { kind: 'service' } },
+          { id: 'int-cp-import', label: 'Імпорт покупців і контрагентів', target: { kind: 'bas-settings', tab: 'import' } },
         ],
       },
     ],
   },
 ];
+
+export function resolveCustomizedMenuSections(
+  sections: MenuSection[],
+  basSettings?: BasSettingsDto
+): MenuSection[] {
+  if (!basSettings) return sections;
+  const { features, menuConfig } = basSettings;
+  const secOv = menuConfig?.sections ?? {};
+  const itemOv = menuConfig?.items ?? {};
+
+  const featureDisabledSection = (id: TopSectionKey): boolean => {
+    if (id === 'crm' && features.useCrm === false) return true;
+    if (id === 'works' && features.useWorks === false) return true;
+    if (id === 'production' && features.useProductionBom === false) return true;
+    if (id === 'hr' && features.usePayroll === false) return true;
+    return false;
+  };
+
+  return sections
+    .map((sec, defaultIdx) => {
+      const ov = secOv[sec.id];
+      // Ніколи не дозволяємо повністю сховати "Налаштування" або "Дашборд", щоб не заблокувати себе
+      const canHide = sec.id !== 'settings' && sec.id !== 'dashboard';
+      const visible = !canHide
+        ? true
+        : ov?.visible !== undefined
+          ? ov.visible
+          : !featureDisabledSection(sec.id);
+
+      const groups = sec.groups
+        .map((grp) => ({
+          ...grp,
+          items: grp.items
+            .filter((it) => itemOv[it.id]?.visible !== false)
+            .map((it) => ({
+              ...it,
+              label:
+                itemOv[it.id]?.label && itemOv[it.id].label!.trim()
+                  ? itemOv[it.id].label!.trim()
+                  : it.label,
+            })),
+        }))
+        .filter((grp) => grp.items.length > 0);
+
+      return {
+        sec: {
+          ...sec,
+          label: ov?.label && ov.label.trim() ? ov.label.trim() : sec.label,
+          groups,
+        },
+        visible,
+        order: typeof ov?.order === 'number' ? ov.order : defaultIdx,
+      };
+    })
+    .filter((entry) => entry.visible)
+    .sort((a, b) => a.order - b.order)
+    .map((entry) => entry.sec);
+}
+
+export function getPinnedMenuItems(
+  sections: MenuSection[],
+  basSettings?: BasSettingsDto
+): Array<{ section: MenuSection; groupTitle: string; item: MenuSubItem }> {
+  if (!basSettings?.menuConfig?.items) return [];
+  const itemOv = basSettings.menuConfig.items;
+  const out: Array<{ section: MenuSection; groupTitle: string; item: MenuSubItem }> = [];
+  for (const sec of sections) {
+    for (const grp of sec.groups) {
+      for (const it of grp.items) {
+        if (itemOv[it.id]?.pinned && itemOv[it.id]?.visible !== false) {
+          out.push({ section: sec, groupTitle: grp.title, item: it });
+        }
+      }
+    }
+  }
+  return out;
+}

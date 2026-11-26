@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { apiFetch, fmtDate, type BootstrapData } from '../lib/api';
 import { UniversalItemsImportModal } from '../components/UniversalItemsImportModal';
+import { UniversalCounterpartiesImportModal } from '../components/UniversalCounterpartiesImportModal';
 
 const SAMPLE_ITEMS_CSV = `Артикул;Найменування;Од. вим.;Тип
 BAS-001;Маршрутизатор MikroTik hAP ax3;шт;Товар
@@ -79,6 +80,7 @@ export function ImportAndServicePage({ bootstrap }: { bootstrap: BootstrapData }
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [universalImportOpen, setUniversalImportOpen] = useState(false);
+  const [cpImportOpen, setCpImportOpen] = useState(false);
 
   const integrations = useQuery({
     queryKey: ['integrations'],
@@ -316,18 +318,33 @@ export function ImportAndServicePage({ bootstrap }: { bootstrap: BootstrapData }
             Кожен конектор працює в режимі DEMO (тест у 1 клік) або LIVE (пряме підключення за токенами)
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setUniversalImportOpen(true)}
-          className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-extrabold shadow-xs transition"
-          style={{
-            background: 'linear-gradient(135deg, var(--primary), var(--primary-2))',
-            color: 'var(--surface)',
-          }}
-        >
-          <Upload className="h-4 w-4" />
-          <span>Імпорт номенклатури з PDF / XLS / CSV / XML</span>
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setCpImportOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-extrabold shadow-xs transition"
+            style={{
+              background: 'var(--pos-soft)',
+              color: 'var(--pos-ink)',
+              border: '1px solid var(--pos)',
+            }}
+          >
+            <Upload className="h-4 w-4" />
+            <span>Імпорт покупців / контрагентів</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setUniversalImportOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-extrabold shadow-xs transition"
+            style={{
+              background: 'linear-gradient(135deg, var(--primary), var(--primary-2))',
+              color: 'var(--surface)',
+            }}
+          >
+            <Upload className="h-4 w-4" />
+            <span>Імпорт номенклатури (PDF / XLS / CSV / XML)</span>
+          </button>
+        </div>
       </div>
 
       {statusMsg && (
@@ -756,6 +773,17 @@ export function ImportAndServicePage({ bootstrap }: { bootstrap: BootstrapData }
               `Універсальний імпорт завершено: створено ${res.created}, оновлено ${res.updated}, категорій +${res.categoriesCreated}${
                 res.priceDocNumber ? `, проведено прайс-лист №${res.priceDocNumber}` : ''
               }.`
+            );
+            refreshAll();
+          }}
+        />
+      )}
+      {cpImportOpen && (
+        <UniversalCounterpartiesImportModal
+          onClose={() => setCpImportOpen(false)}
+          onImported={(res) => {
+            setStatusMsg(
+              `Імпорт покупців/контрагентів завершено: створено ${res.created}, оновлено ${res.updated}, договорів +${res.contractsCreated}.`
             );
             refreshAll();
           }}

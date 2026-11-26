@@ -3,7 +3,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { extractText, getDocumentProxy } from 'unpdf';
 import { eq } from 'drizzle-orm';
 import type { AppDb } from './db.js';
-import { categories, documentLines, documents, items, priceTypes } from './schema.js';
+import { categories, contracts, counterparties, documentLines, documents, items, priceTypes } from './schema.js';
 import { postDocument } from './posting-engine.js';
 import { toNumeric2 } from './money.js';
 
@@ -795,5 +795,438 @@ export async function commitUniversalItemsImport(
     categoriesCreated,
     pricesApplied: priceDocNumber ? priceEntries.length : 0,
     priceDocNumber,
+  };
+}
+
+// ============================================================================
+// УНІВЕРСАЛЬНИЙ ІМПОРТ ПОКУПЦІВ ТА КОНТРАГЕНТІВ (PDF / EXCEL / CSV / XML)
+// ============================================================================
+
+export interface ParsedImportCounterparty {
+  name: string;
+  edrpou: string;
+  ipn: string;
+  iban: string;
+  phone: string;
+  email: string;
+  isCustomer: boolean;
+  isSupplier: boolean;
+}
+
+export interface UniversalCounterpartiesParseResult {
+  format: 'EXCEL' | 'CSV' | 'XML' | 'PDF';
+  filename: string;
+  totalDetected: number;
+  warnings: string[];
+  counterparties: ParsedImportCounterparty[];
+}
+
+function detectCounterpartyRoles(rawRole: string): { isCustomer: boolean; isSupplier: boolean } {
+  const s = rawRole.toLowerCase();
+  if (!s) return { isCustomer: true, isSupplier: false };
+  const isSup = /(постач|поставщ|supplier|vendor|партнер)/.test(s);
+  const isCust = /(покуп|клієнт|клиент|buyer|customer|client|замовн)/.test(s);
+  if (isSup && isCust) return { isCustomer: true, isSupplier: true };
+  if (isSup) return { isCustomer: false, isSupplier: true };
+  return { isCustomer: true, isSupplier: false };
+}
+
+function extractCounterpartiesFromMatrix(
+  rows: unknown[][],
+  warnings: string[]
+): ParsedImportCounterparty[] {
+  const cleanRows = rows
+    .map((r) => (Array.isArray(r) ? r.map(cleanStr) : []))
+    .filter((r) => r.some((cell) => cell.length > 0));
+
+  if (cleanRows.length === 0) return [];
+
+  const headerKeywords = [
+    'назва',
+    'найменування',
+    'наименование',
+    'контрагент',
+    'покупець',
+    'клієнт',
+    'клиент',
+    'постачальник',
+    'компанія',
+    'організація',
+    'піб',
+    'фио',
+    'name',
+    'client',
+    'customer',
+    'supplier',
+    'єдрпоу',
+    'едрпоу',
+    'окпо',
+    'іпн',
+    'инн',
+    'рнокпп',
+    'edrpou',
+    'iban',
+    'рахунок',
+    'телефон',
+    'тел',
+    'phone',
+    'email',
+    'e-mail',
+    'пошта',
+    'роль',
+    'тип',
+  ];
+
+  let headerIdx = -1;
+  let bestScore = 0;
+  for (let i = 0; i < Math.min(cleanRows.length, 15); i++) {
+    let score = 0;
+    for (const cell of cleanRows[i]) {
+      const lc = cell.toLowerCase();
+      if (headerKeywords.some((kw) => lc.includes(kw))) score++;
+    }
+    if (score > bestScore && score >= 1) {
+      bestScore = score;
+      headerIdx = i;
+    }
+  }
+
+  let colName = -1;
+  let colEdrpou = -1;
+  let colIpn = -1;
+  let colIban = -1;
+  let colPhone = -1;
+  let colEmail = -1;
+  let colRole = -1;
+
+  if (headerIdx >= 0) {
+    const hdr = cleanRows[headerIdx].map((c) => c.toLowerCase());
+    hdr.forEach((h, idx) => {
+      if (
+        colName < 0 &&
+        /(назв|найменув|наименов|контрагент|покуп|клієнт|клиент|постач|компан|організ|піб|фио|name|client|customer|partner)/.test(
+          h
+        )
+      ) {
+        colName = idx;
+      } else if (colEdrpou < 0 && /(єдрпоу|едрпоу|окпо|код|edrpou|tax)/.test(h)) {
+        colEdrpou = idx;
+      } else if (colIpn < 0 && /(іпн|инн|рнокпп|ipn|tin)/.test(h)) {
+        colIpn = idx;
+      } else if (colIban < 0 && /(iban|рахунок|счет|р\/р|bank)/.test(h)) {
+        colIban = idx;
+      } else if (colPhone < 0 && /(тел|phone|моб|mobile|контакт)/.test(h)) {
+        colPhone = idx;
+      } else if (colEmail < 0 && /(mail|пошт|email)/.test(h)) {
+        colEmail = idx;
+      } else if (colRole < 0 && /(роль|тип|вид|role|type|група)/.test(h)) {
+        colRole = idx;
+      }
+    });
+  }
+
+  const dataRows = headerIdx >= 0 ? cleanRows.slice(headerIdx + 1) : cleanRows;
+
+  if (colName < 0) {
+    warnings.push('Заголовки колонок контрагентів визначено автоматично.');
+    colName = 0;
+  }
+
+  const result: ParsedImportCounterparty[] = [];
+  const seen = new Set<string>();
+
+  for (const r of dataRows) {
+    let name = cleanStr(r[colName]);
+    if (!name || name.length < 2) continue;
+    if (/^(всього|разом|итого|total|№|контрагент|найменування)$/i.test(name)) continue;
+
+    // Scan all cells for auto-extraction of IBAN, email, phone, EDRPOU if columns weren't explicitly mapped
+    let edrpou = colEdrpou >= 0 ? cleanStr(r[colEdrpou]) : '';
+    let ipn = colIpn >= 0 ? cleanStr(r[colIpn]) : '';
+    let iban = colIban >= 0 ? cleanStr(r[colIban]) : '';
+    let phone = colPhone >= 0 ? cleanStr(r[colPhone]) : '';
+    let email = colEmail >= 0 ? cleanStr(r[colEmail]) : '';
+    const rawRole = colRole >= 0 ? cleanStr(r[colRole]) : '';
+
+    for (let c = 0; c < r.length; c++) {
+      if (c === colName) continue;
+      const cell = r[c];
+      if (!cell) continue;
+      if (!iban && /^UA\d{25,29}$/i.test(cell.replace(/\s+/g, ''))) {
+        iban = cell.replace(/\s+/g, '').toUpperCase();
+      } else if (!email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cell)) {
+        email = cell;
+      } else if (!phone && /(\+?38\s*0|0\d{2})[\s\-()]?\d{3}[\s\-()]?\d{2}[\s\-()]?\d{2}/.test(cell)) {
+        phone = cell;
+      } else if (!edrpou && /^\d{8,10}$/.test(cell)) {
+        edrpou = cell;
+      }
+    }
+
+    edrpou = edrpou.replace(/[^\d]/g, '').slice(0, 12);
+    ipn = ipn.replace(/[^\d]/g, '').slice(0, 12);
+    const key = edrpou ? `edrpou:${edrpou}` : `name:${name.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const roles = detectCounterpartyRoles(rawRole);
+    result.push({
+      name: name.slice(0, 180),
+      edrpou,
+      ipn,
+      iban,
+      phone,
+      email,
+      isCustomer: roles.isCustomer,
+      isSupplier: roles.isSupplier,
+    });
+  }
+
+  return result;
+}
+
+function extractCounterpartiesFromXml(xmlText: string, warnings: string[]): ParsedImportCounterparty[] {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    trimValues: true,
+    parseTagValue: false,
+  });
+  const doc = parser.parse(xmlText);
+  const out: ParsedImportCounterparty[] = [];
+  const seen = new Set<string>();
+
+  const walk = (node: unknown) => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const el of node) walk(el);
+      return;
+    }
+    const rec = node as Record<string, unknown>;
+    const nameVal =
+      rec.name ??
+      rec.Name ??
+      rec.FullName ??
+      rec['Наименование'] ??
+      rec['Найменування'] ??
+      rec['ПолноеНаименование'] ??
+      rec['ПовнаНазва'] ??
+      rec['Назва'] ??
+      rec.title;
+
+    if (typeof nameVal === 'string' && nameVal.trim().length >= 2) {
+      const name = cleanStr(nameVal);
+      const edrpou = cleanStr(
+        rec.edrpou ?? rec.EDRPOU ?? rec.okpo ?? rec['ЄДРПОУ'] ?? rec['ЕДРПОУ'] ?? rec['ОКПО'] ?? rec['КодПоЕДРПОУ'] ?? ''
+      ).replace(/[^\d]/g, '');
+      const ipn = cleanStr(rec.ipn ?? rec.IPN ?? rec.inn ?? rec['ІПН'] ?? rec['ИНН'] ?? '').replace(/[^\d]/g, '');
+      const iban = cleanStr(rec.iban ?? rec.IBAN ?? rec['Рахунок'] ?? '').replace(/\s+/g, '');
+      const phone = cleanStr(rec.phone ?? rec.Phone ?? rec['Телефон'] ?? '');
+      const email = cleanStr(rec.email ?? rec.Email ?? rec['Пошта'] ?? '');
+      const role = cleanStr(rec.role ?? rec.type ?? rec['Роль'] ?? rec['Тип'] ?? '');
+      const roles = detectCounterpartyRoles(role);
+      const key = edrpou ? `edrpou:${edrpou}` : `name:${name.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({
+          name,
+          edrpou,
+          ipn,
+          iban,
+          phone,
+          email,
+          isCustomer: roles.isCustomer,
+          isSupplier: roles.isSupplier,
+        });
+      }
+      return;
+    }
+
+    for (const val of Object.values(rec)) {
+      if (val && typeof val === 'object') walk(val);
+    }
+  };
+
+  walk(doc);
+  if (out.length === 0) {
+    warnings.push('У XML-файлі не знайдено вузлів контрагентів (<counterparty>, <client>, <Контрагент>).');
+  }
+  return out;
+}
+
+function extractCounterpartiesFromPdfText(text: string, warnings: string[]): ParsedImportCounterparty[] {
+  const lines = text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length >= 3);
+
+  const matrix: string[][] = [];
+  for (const line of lines) {
+    if (line.includes(';') || line.includes('\t')) {
+      const cols = line.split(/[;\t]/).map((c) => c.trim());
+      if (cols.length >= 2) {
+        matrix.push(cols);
+        continue;
+      }
+    }
+    const multiSpaceCols = line.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean);
+    if (multiSpaceCols.length >= 2) {
+      matrix.push(multiSpaceCols);
+      continue;
+    }
+    // Extract phone / email / EDRPOU / IBAN from single line
+    const ibanMatch = line.match(/UA\d{25,29}/i);
+    const emailMatch = line.match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
+    const phoneMatch = line.match(/(\+?38\s*0|0\d{2})[\s\-()]?\d{3}[\s\-()]?\d{2}[\s\-()]?\d{2}/);
+    const edrpouMatch = line.match(/\b(\d{8}|\d{10})\b/);
+    let cleanName = line;
+    if (ibanMatch) cleanName = cleanName.replace(ibanMatch[0], '');
+    if (emailMatch) cleanName = cleanName.replace(emailMatch[0], '');
+    if (phoneMatch) cleanName = cleanName.replace(phoneMatch[0], '');
+    if (edrpouMatch) cleanName = cleanName.replace(edrpouMatch[0], '');
+    cleanName = cleanName.replace(/^\d+[\.\)]\s*/, '').replace(/[|,;]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (cleanName.length >= 3 && (phoneMatch || emailMatch || edrpouMatch || ibanMatch)) {
+      matrix.push([
+        cleanName,
+        edrpouMatch?.[1] ?? '',
+        phoneMatch?.[0] ?? '',
+        emailMatch?.[0] ?? '',
+        ibanMatch?.[0] ?? '',
+      ]);
+    }
+  }
+
+  if (matrix.length === 0) {
+    warnings.push('У PDF-файлі не вдалося знайти рядки контрагентів (назва + телефон / ЄДРПОУ / email).');
+    return [];
+  }
+  return extractCounterpartiesFromMatrix(matrix, warnings);
+}
+
+export async function parseUniversalCounterpartiesFile(params: {
+  filename: string;
+  contentBase64: string;
+  mimeType?: string;
+}): Promise<UniversalCounterpartiesParseResult> {
+  const buf = Buffer.from(params.contentBase64, 'base64');
+  const ext = (params.filename.split('.').pop() || '').toLowerCase();
+  const mime = (params.mimeType || '').toLowerCase();
+  const warnings: string[] = [];
+
+  if (ext === 'pdf' || mime.includes('pdf') || buf.subarray(0, 4).toString('ascii') === '%PDF') {
+    try {
+      const pdf = await getDocumentProxy(new Uint8Array(buf));
+      const extracted = await extractText(pdf, { mergePages: true });
+      const text = Array.isArray(extracted.text) ? extracted.text.join('\n') : String(extracted.text || '');
+      const list = extractCounterpartiesFromPdfText(text, warnings);
+      return { format: 'PDF', filename: params.filename, totalDetected: list.length, warnings, counterparties: list };
+    } catch (err) {
+      warnings.push(`Помилка читання PDF: ${(err as Error).message}`);
+      return { format: 'PDF', filename: params.filename, totalDetected: 0, warnings, counterparties: [] };
+    }
+  }
+
+  if (ext === 'xlsx' || ext === 'xls' || ext === 'ods' || mime.includes('spreadsheet') || mime.includes('excel')) {
+    const wb = XLSX.read(buf, { type: 'buffer' });
+    const firstSheet = wb.SheetNames[0];
+    const ws = firstSheet ? wb.Sheets[firstSheet] : undefined;
+    const matrix = ws ? (XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][]) : [];
+    const list = extractCounterpartiesFromMatrix(matrix, warnings);
+    return { format: 'EXCEL', filename: params.filename, totalDetected: list.length, warnings, counterparties: list };
+  }
+
+  const text = decodeTextSmart(buf);
+  const trimmed = text.trimStart();
+  if (ext === 'xml' || mime.includes('xml') || trimmed.startsWith('<?xml') || /^<[a-zA-Zа-яА-ЯіІїЇєЄ_][\w:-]*/.test(trimmed)) {
+    const list = extractCounterpartiesFromXml(text, warnings);
+    return { format: 'XML', filename: params.filename, totalDetected: list.length, warnings, counterparties: list };
+  }
+
+  const matrix = parseDelimitedText(text);
+  const list = extractCounterpartiesFromMatrix(matrix, warnings);
+  return { format: 'CSV', filename: params.filename, totalDetected: list.length, warnings, counterparties: list };
+}
+
+export async function commitUniversalCounterpartiesImport(
+  db: AppDb,
+  params: {
+    organizationId: string;
+    counterparties: ParsedImportCounterparty[];
+    createDefaultContracts?: boolean;
+  }
+) {
+  const existing = await db.select().from(counterparties);
+  const byEdrpou = new Map(
+    existing.filter((c) => c.edrpou.trim()).map((c) => [c.edrpou.trim(), c])
+  );
+  const byName = new Map(existing.map((c) => [c.name.trim().toLowerCase(), c]));
+
+  let created = 0;
+  let updated = 0;
+  let contractsCreated = 0;
+
+  for (const row of params.counterparties) {
+    const name = cleanStr(row.name);
+    if (!name) continue;
+    const edrpou = cleanStr(row.edrpou);
+    const ipn = cleanStr(row.ipn);
+    const iban = cleanStr(row.iban);
+    const phone = cleanStr(row.phone);
+    const email = cleanStr(row.email);
+
+    const found = (edrpou ? byEdrpou.get(edrpou) : undefined) ?? byName.get(name.toLowerCase());
+    if (found) {
+      await db
+        .update(counterparties)
+        .set({
+          name,
+          ...(edrpou ? { edrpou } : {}),
+          ...(ipn ? { ipn } : {}),
+          ...(iban ? { iban } : {}),
+          ...(phone ? { phone } : {}),
+          ...(email ? { email } : {}),
+          isCustomer: found.isCustomer || row.isCustomer,
+          isSupplier: found.isSupplier || row.isSupplier,
+        })
+        .where(eq(counterparties.id, found.id));
+      updated++;
+    } else {
+      const [inserted] = await db
+        .insert(counterparties)
+        .values({
+          name,
+          edrpou,
+          ipn,
+          iban,
+          phone,
+          email,
+          isCustomer: row.isCustomer,
+          isSupplier: row.isSupplier,
+          isActive: true,
+        })
+        .returning();
+      if (edrpou) byEdrpou.set(edrpou, inserted);
+      byName.set(name.toLowerCase(), inserted);
+      created++;
+
+      if (params.createDefaultContracts) {
+        await db.insert(contracts).values({
+          organizationId: params.organizationId,
+          counterpartyId: inserted.id,
+          name: row.isSupplier && !row.isCustomer ? 'Основний договір постачання' : 'Основний договір',
+          currency: 'UAH',
+          contractType: row.isSupplier && !row.isCustomer ? 'SUPPLIER' : 'CUSTOMER',
+        });
+        contractsCreated++;
+      }
+    }
+  }
+
+  return {
+    created,
+    updated,
+    contractsCreated,
   };
 }

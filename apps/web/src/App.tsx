@@ -21,6 +21,7 @@ import {
   Network,
   Lock,
   BookOpenCheck,
+  Star,
 } from 'lucide-react';
 import {
   apiFetch,
@@ -40,7 +41,10 @@ import {
   type PermissionMap,
 } from './lib/api';
 import {
+  getPinnedMenuItems,
   MENU_SECTIONS,
+  resolveCustomizedMenuSections,
+  type BasSettingsTabKey,
   type MenuSection,
   type MenuSubItem,
   type TargetRoute,
@@ -55,6 +59,7 @@ import { ImportAndServicePage } from './pages/ImportAndServicePage';
 import { CrmPage } from './pages/CrmPage';
 import { AssetsAndCurrencyPage } from './pages/AssetsAndCurrencyPage';
 import { StatutoryReportsPage } from './pages/StatutoryReportsPage';
+import { BasSettingsPage } from './pages/BasSettingsPage';
 import { MovementsModal } from './components/MovementsModal';
 import { DocumentEditorModal } from './components/DocumentEditorModal';
 import { CommandPaletteModal } from './components/CommandPaletteModal';
@@ -81,6 +86,7 @@ type PageKey =
   | 'reports'
   | 'catalogs'
   | 'service'
+  | 'bas-settings'
   | 'module';
 
 interface ActiveContext {
@@ -99,6 +105,10 @@ const PAGE_TITLES: Record<Exclude<PageKey, 'module'>, { title: string; subtitle:
   reports: { title: 'Управлінська аналітика та P&L', subtitle: 'Складські залишки FIFO, прибутковість, борги та Cash Flow' },
   catalogs: { title: 'Довідники та BOM', subtitle: 'Номенклатура, контрагенти, штатний розпис і специфікації BOM' },
   service: { title: 'Інтеграції та Сервіс', subtitle: 'BAS OData, Monobank, Приват24, Checkbox ПРРО та регламент' },
+  'bas-settings': {
+    title: 'Налаштування BAS Малий бізнес',
+    subtitle: 'Ще більше можливостей, конструктор полів документів, налаштування меню/підменю та імпорт',
+  },
 };
 
 const DOCK_ACTIONS: Array<{
@@ -285,6 +295,7 @@ function ErpShell({
   const [activeCtx, setActiveCtx] = useState<ActiveContext>({ sectionId: 'dashboard' });
   const [docInitialType, setDocInitialType] = useState<string>('');
   const [catalogInitialTab, setCatalogInitialTab] = useState<CatalogTab>('items');
+  const [basSettingsTab, setBasSettingsTab] = useState<BasSettingsTabKey>('features');
   const [megaMenuSection, setMegaMenuSection] = useState<MenuSection | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -431,6 +442,7 @@ function ErpShell({
       reports: 'company',
       catalogs: 'company',
       service: 'integrations',
+      'bas-settings': 'settings',
     };
     setPage(targetPage);
     if (targetPage === 'documents') setDocInitialType('');
@@ -450,7 +462,7 @@ function ErpShell({
       if (target.modal === 'users') setUsersModal({ open: true, tab: 'users' });
       if (target.modal === 'password') setUsersModal({ open: true, tab: 'password' });
       if (target.modal === 'new-doc') {
-        setLauncher({ open: true, docType: target.docType ?? 'sales_invoice' });
+        openQuickCreate(target.docType ?? 'sales_invoice');
       }
       return;
     }
@@ -465,6 +477,10 @@ function ErpShell({
         setPage('crm');
         break;
       case 'documents':
+        if (target.createType) {
+          openQuickCreate(target.createType);
+          break;
+        }
         setDocInitialType(target.docType ?? '');
         setPage('documents');
         break;
@@ -487,6 +503,10 @@ function ErpShell({
       case 'service':
         setPage('service');
         break;
+      case 'bas-settings':
+        setBasSettingsTab(target.tab ?? 'features');
+        setPage('bas-settings');
+        break;
       case 'module':
         setPage('module');
         break;
@@ -504,7 +524,17 @@ function ErpShell({
 
   const liveUser = bootstrap.currentUser ?? currentUser;
   const perms = liveUser.effectivePermissions;
-  const visibleSections = MENU_SECTIONS.filter((sec) => canAccessSection(sec.id, perms));
+  const customizedSections = resolveCustomizedMenuSections(MENU_SECTIONS, bootstrap.basSettings);
+  const visibleSections = customizedSections.filter((sec) => canAccessSection(sec.id, perms));
+  const pinnedMenuItems = getPinnedMenuItems(visibleSections, bootstrap.basSettings);
+  const openDocDirectlyInPopup = bootstrap.basSettings?.features?.alwaysOpenDocsInModal !== false;
+  const triggerCreateDoc = (dt: DocumentType) => {
+    if (openDocDirectlyInPopup) {
+      openQuickCreate(dt);
+    } else {
+      setLauncher({ open: true, docType: dt });
+    }
+  };
   const visibleDockActions = DOCK_ACTIONS.filter(
     (act) => !perms || perms[act.reqPerm] || (act.docType === 'money_in' && perms.sales)
   );
@@ -525,7 +555,9 @@ function ErpShell({
 
   const isFop = bootstrap.organization.entityType === 'FOP';
   const activeSectionObj =
-    MENU_SECTIONS.find((s) => s.id === activeCtx.sectionId) ?? MENU_SECTIONS[0];
+    customizedSections.find((s) => s.id === activeCtx.sectionId) ??
+    MENU_SECTIONS.find((s) => s.id === activeCtx.sectionId) ??
+    MENU_SECTIONS[0];
 
   return (
     <div className="min-h-screen">
@@ -1057,6 +1089,35 @@ function ErpShell({
               );
             })}
           </nav>
+
+          {/* Закріплені пункти меню («Обране» з налаштувань BAS) */}
+          {pinnedMenuItems.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              <span
+                className="inline-flex items-center gap-1 px-2 text-[11px] font-extrabold uppercase tracking-wide"
+                style={{ color: 'var(--muted)' }}
+              >
+                <Star className="h-3 w-3" style={{ color: 'var(--warn)' }} fill="currentColor" />
+                Обране:
+              </span>
+              {pinnedMenuItems.map(({ section, groupTitle, item }) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => applyTargetRoute(item.target, section, groupTitle, item)}
+                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-bold transition"
+                  style={{
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-2)',
+                    boxShadow: 'var(--shadow-soft)',
+                  }}
+                >
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </header>
 
         {/* Підзаголовок та навігаційна крихта для відкритих розділів */}
@@ -1148,6 +1209,22 @@ function ErpShell({
             <CatalogsPage bootstrap={bootstrap} initialTab={catalogInitialTab} />
           )}
           {page === 'service' && <ImportAndServicePage bootstrap={bootstrap} />}
+          {page === 'bas-settings' && (
+            <BasSettingsPage
+              bootstrap={bootstrap}
+              initialTab={basSettingsTab}
+              onOpenPrintTemplates={() => {
+                setCatalogInitialTab('templates');
+                setPage('catalogs');
+                setActiveCtx({ sectionId: 'company' });
+              }}
+              onOpenModal={(m) => {
+                if (m === 'organizations') setOrgManagerOpen(true);
+                if (m === 'departments') setDeptManagerOpen(true);
+                if (m === 'users') setUsersModal({ open: true, tab: 'users' });
+              }}
+            />
+          )}
           {page === 'module' && activeCtx.item && (
             <SectionModuleView
               section={activeSectionObj}
@@ -1155,7 +1232,7 @@ function ErpShell({
               item={activeCtx.item}
               organization={bootstrap.organization}
               onSelectSibling={(sec, grp, it) => applyTargetRoute(it.target, sec, grp, it)}
-              onCreateDoc={(dt) => setLauncher({ open: true, docType: dt })}
+              onCreateDoc={(dt) => triggerCreateDoc(dt)}
               onOpenRelatedPage={(p) => navigateSimplePage(p, activeSectionObj.id)}
             />
           )}
@@ -1181,7 +1258,7 @@ function ErpShell({
               <button
                 key={act.label}
                 type="button"
-                onClick={() => setLauncher({ open: true, docType: act.docType })}
+                onClick={() => triggerCreateDoc(act.docType)}
                 className="dock-item"
               >
                 <span
@@ -1197,7 +1274,7 @@ function ErpShell({
 
           <button
             type="button"
-            onClick={() => setLauncher({ open: true, docType: 'sales_invoice' })}
+            onClick={() => triggerCreateDoc('customer_order')}
             aria-label="Новий документ"
             className="dock-primary"
           >
@@ -1232,7 +1309,7 @@ function ErpShell({
         <button
           type="button"
           aria-label="Створити новий документ"
-          onClick={() => setLauncher({ open: true, docType: 'customer_order' })}
+          onClick={() => triggerCreateDoc('customer_order')}
           className="mobile-tab-fab"
         >
           <Plus className="h-6 w-6" aria-hidden="true" />
@@ -1284,6 +1361,12 @@ function ErpShell({
           activeItemId={activeCtx.item?.id ?? null}
           onSelectItem={(sec, grp, it) => applyTargetRoute(it.target, sec, grp, it)}
           onOpenSectionDefault={(sec) => applyTargetRoute(sec.defaultTarget, sec)}
+          onQuickCreateDoc={(dt) => openQuickCreate(dt)}
+          onOpenMenuSettings={() => {
+            setBasSettingsTab('menu');
+            setPage('bas-settings');
+            setActiveCtx({ sectionId: 'settings' });
+          }}
           onClose={() => setMegaMenuSection(null)}
         />
       )}

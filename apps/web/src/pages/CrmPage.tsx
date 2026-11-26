@@ -10,9 +10,11 @@ import {
   CheckCircle2,
   User,
   TrendingUp,
+  Upload,
 } from 'lucide-react';
 import { apiFetch, fmtDate, fmtMoney, type BootstrapData } from '../lib/api';
 import { SmartCounterpartyCombobox } from '../components/SmartCounterpartyCombobox';
+import { UniversalCounterpartiesImportModal } from '../components/UniversalCounterpartiesImportModal';
 
 type StageKey = 'NEW' | 'QUALIFIED' | 'PROPOSAL' | 'NEGOTIATION' | 'WON' | 'LOST';
 
@@ -90,6 +92,7 @@ export function CrmPage({ bootstrap }: { bootstrap: BootstrapData }) {
     durationSec: 180,
   });
   const [notice, setNotice] = useState<string | null>(null);
+  const [cpImportOpen, setCpImportOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['crm-pipeline', bootstrap.organization.id, bootstrap.activeDepartmentId ?? 'ALL'],
@@ -170,6 +173,25 @@ export function CrmPage({ bootstrap }: { bootstrap: BootstrapData }) {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>
+          База клієнтів: <strong>{bootstrap.counterparties.filter((c) => c.isCustomer).length}</strong> покупців
+        </div>
+        <button
+          type="button"
+          onClick={() => setCpImportOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-extrabold transition"
+          style={{
+            background: 'var(--pos-soft)',
+            color: 'var(--pos-ink)',
+            border: '1px solid var(--pos)',
+          }}
+        >
+          <Upload className="h-3.5 w-3.5" />
+          <span>Імпорт покупців (PDF / XLS / CSV / XML)</span>
+        </button>
+      </div>
+
       {/* Metrics Strip */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div className="erp-card p-4">
@@ -476,6 +498,18 @@ export function CrmPage({ bootstrap }: { bootstrap: BootstrapData }) {
             </div>
           </div>
         </div>
+      )}
+
+      {cpImportOpen && (
+        <UniversalCounterpartiesImportModal
+          onClose={() => setCpImportOpen(false)}
+          onImported={(res) => {
+            setNotice(
+              `Імпорт покупців завершено: додано ${res.created}, оновлено ${res.updated}, створено договорів: ${res.contractsCreated}.`
+            );
+            refresh();
+          }}
+        />
       )}
     </div>
   );

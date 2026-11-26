@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, lte, ne, sql } from 'drizzle-orm';
 import type { AppDb } from './db.js';
 import {
+  basSettings,
   cashAccounts,
   cashflowCategories,
   chartOfAccounts,
@@ -25,6 +26,7 @@ import {
   warehouses,
 } from './schema.js';
 import { ensureChartOfAccounts } from './accounting-service.js';
+import { DEFAULT_BAS_FEATURES, parseDocumentMeta } from './bas-settings.js';
 import { d, monthStartUtc, round2, round4, toIsoDate, toNumeric2, toNumeric4 } from './money.js';
 
 export class PostingError extends Error {
@@ -358,7 +360,7 @@ async function executePostingInTx(tx: Tx, documentId: string): Promise<void> {
 
   await clearDocumentMovements(tx, doc.id);
 
-  const [lines, allItems, allWarehouses, allCfCats, allCps, allAccs, allCoa, allEmps] =
+  const [lines, allItems, allWarehouses, allCfCats, allCps, allAccs, allCoa, allEmps, basRowList, parentDocList] =
     await Promise.all([
       tx
         .select()
@@ -372,7 +374,22 @@ async function executePostingInTx(tx: Tx, documentId: string): Promise<void> {
       tx.select().from(cashAccounts),
       tx.select().from(chartOfAccounts),
       tx.select().from(employees).where(eq(employees.organizationId, doc.organizationId)),
+      tx.select().from(basSettings).where(eq(basSettings.organizationId, doc.organizationId)).limit(1),
+      doc.parentDocId
+        ? tx.select().from(documents).where(eq(documents.id, doc.parentDocId)).limit(1)
+        : Promise.resolve([]),
     ]);
+
+  const docMeta = parseDocumentMeta(doc.metaJson);
+  const parentMeta = parentDocList[0] ? parseDocumentMeta(parentDocList[0].metaJson) : {};
+  let basFeatures = { ...DEFAULT_BAS_FEATURES };
+  if (basRowList[0]?.featuresJson) {
+    try {
+      basFeatures = { ...DEFAULT_BAS_FEATURES, ...JSON.parse(basRowList[0].featuresJson) };
+    } catch {}
+  }
+  const allowOrderWithoutStock = Boolean(basFeatures.allowOrderWithoutStock);
+  const parentOrderAllowsNegative = Boolean(parentMeta.isBackorder || parentMeta.allowNegativeStock);
 
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
   const warehouseMap = new Map(allWarehouses.map((w) => [w.id, w]));
@@ -581,7 +598,11 @@ async function executePostingInTx(tx: Tx, documentId: string): Promise<void> {
     }
 
     case 'customer_order': {
-      if (!doc.warehouseId) {
+      const effectiveWhId =
+        doc.warehouseId ??
+        allWarehouses.find((w) => w.organizationId === doc.organizationId)?.id ??
+        null;
+      if (!effectiveWhId && !allowOrderWithoutStock) {
         throw new PostingError('VALIDATION_ERROR', 'У замовленні покупця не вказано склад резервування');
       }
       if (!doc.counterpartyId) {
@@ -591,8 +612,9 @@ async function executePostingInTx(tx: Tx, documentId: string): Promise<void> {
         throw new PostingError('VALIDATION_ERROR', 'У замовленні відсутні товарні рядки');
       }
 
-      const wh = warehouseMap.get(doc.warehouseId);
+      const wh = effectiveWhId ? warehouseMap.get(effectiveWhId) : undefined;
       let totalOrder = d(0);
+      let hasBackorderShortfall = Boolean(docMeta.allowNegativeStock);
 
       for (const line of lines) {
         if (!line.itemId) continue;
@@ -607,30 +629,37 @@ async function executePostingInTx(tx: Tx, documentId: string): Promise<void> {
         const amount = round2(d(line.amount).gt(0) ? line.amount : qty.mul(d(line.price)));
         totalOrder = totalOrder.plus(amount);
 
-        if (item.itemType === 'GOODS') {
-          if (!org.allowNegativeStock) {
-            const phys = await getPhysicalQtyAsOf(
-              tx,
-              doc.organizationId,
-              doc.warehouseId,
-              item.id,
-              doc.docDate
-            );
-            const alreadyReserved = await getReservedQtyAsOf(
-              tx,
-              doc.organizationId,
-              doc.warehouseId,
-              item.id,
-              doc.docDate,
-              doc.id
-            );
-            const free = phys.minus(alreadyReserved);
-            if (free.lt(qty)) {
+        if (item.itemType === 'GOODS' && effectiveWhId) {
+          const phys = await getPhysicalQtyAsOf(
+            tx,
+            doc.organizationId,
+            effectiveWhId,
+            item.id,
+            doc.docDate
+          );
+          const alreadyReserved = await getReservedQtyAsOf(
+            tx,
+            doc.organizationId,
+            effectiveWhId,
+            item.id,
+            doc.docDate,
+            doc.id
+          );
+          const free = phys.minus(alreadyReserved);
+          const allowNegativeForThisOrder =
+            org.allowNegativeStock ||
+            allowOrderWithoutStock ||
+            Boolean(docMeta.allowNegativeStock) ||
+            Boolean(item.isOrderOnly);
+
+          if (free.lt(qty)) {
+            if (!allowNegativeForThisOrder) {
               throw new PostingError(
                 'INSUFFICIENT_FREE_STOCK',
                 `Неможливо зарезервувати "${item.name}" на складі "${wh?.name ?? ''}": фізично ${phys.toFixed(2)}, вже в резерві ${alreadyReserved.toFixed(2)}, вільно ${free.toFixed(2)}, замовлено ${qty.toFixed(2)}`
               );
             }
+            hasBackorderShortfall = true;
           }
 
           await tx.insert(regStockReservations).values({
@@ -640,7 +669,7 @@ async function executePostingInTx(tx: Tx, documentId: string): Promise<void> {
             period: doc.docDate,
             movementType: 'RESERVE',
             orderDocId: doc.id,
-            warehouseId: doc.warehouseId,
+            warehouseId: effectiveWhId,
             itemId: item.id,
             qty: toNumeric4(qty),
           });
@@ -652,9 +681,14 @@ async function executePostingInTx(tx: Tx, documentId: string): Promise<void> {
           .where(eq(documentLines.id, line.id));
       }
 
+      const nextMeta = { ...docMeta, isBackorder: hasBackorderShortfall };
       await tx
         .update(documents)
-        .set({ totalAmount: toNumeric2(totalOrder) })
+        .set({
+          totalAmount: toNumeric2(totalOrder),
+          warehouseId: effectiveWhId,
+          metaJson: JSON.stringify(nextMeta),
+        })
         .where(eq(documents.id, doc.id));
       break;
     }
@@ -796,6 +830,12 @@ async function executePostingInTx(tx: Tx, documentId: string): Promise<void> {
             }
           }
 
+          const allowNegForLine =
+            org.allowNegativeStock ||
+            Boolean(item.isOrderOnly) ||
+            Boolean(docMeta.allowNegativeStock) ||
+            parentOrderAllowsNegative;
+
           const { allocations, totalCost } = await allocateFifo(tx, {
             organizationId: doc.organizationId,
             warehouseId: doc.warehouseId,
@@ -804,7 +844,7 @@ async function executePostingInTx(tx: Tx, documentId: string): Promise<void> {
             itemName: item.name,
             requiredQty: toNumeric4(qty),
             asOfDate: doc.docDate,
-            allowNegativeStock: org.allowNegativeStock,
+            allowNegativeStock: allowNegForLine,
             fallbackBatchDocId: doc.id,
             respectReservations: true,
             excludeOrderDocId: doc.parentDocId,

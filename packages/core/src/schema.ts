@@ -8,6 +8,7 @@ import {
   integer,
   primaryKey,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 // ============================================================================
@@ -90,6 +91,7 @@ export const items = pgTable(
     categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'set null' }),
     unit: text('unit').notNull().default('шт'),
     itemType: text('item_type').notNull().default('GOODS'), // GOODS | SERVICE
+    isOrderOnly: boolean('is_order_only').notNull().default(false), // Товар під замовлення (дозволено в мінус)
     externalId: text('external_id').notNull().default(''),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -364,6 +366,7 @@ export const documents = pgTable(
     externalId: text('external_id').notNull().default(''),
     shareToken: text('share_token').notNull().default(''),
     comment: text('comment').notNull().default(''),
+    metaJson: text('meta_json').notNull().default('{}'),
     postedAt: timestamp('posted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -779,4 +782,20 @@ export const printTemplates = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [index('idx_print_templates_org_key').on(table.organizationId, table.templateKey)]
+);
+
+// 7. НАЛАШТУВАННЯ BAS МАЛИЙ БІЗНЕС (ФУНКЦІОНАЛЬНІ ОПЦІЇ, ПОЛЯ ДОКУМЕНТІВ, МЕНЮ ТА ПІДМЕНЮ)
+export const basSettings = pgTable(
+  'bas_settings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    featuresJson: text('features_json').notNull().default('{}'),
+    docFieldsJson: text('doc_fields_json').notNull().default('{}'),
+    menuConfigJson: text('menu_config_json').notNull().default('{}'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex('uq_bas_settings_org').on(table.organizationId)]
 );

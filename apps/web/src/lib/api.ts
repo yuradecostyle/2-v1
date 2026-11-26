@@ -389,6 +389,7 @@ export interface BootstrapData {
   currentUser?: AuthUserDto | null;
   organization: OrganizationDto;
   organizations: OrganizationDto[];
+  basSettings?: BasSettingsDto;
   departments: DepartmentDto[];
   allDepartments: DepartmentDto[];
   activeDepartmentId: string | null;
@@ -419,6 +420,7 @@ export interface BootstrapData {
     categoryId: string | null;
     unit: string;
     itemType: 'GOODS' | 'SERVICE';
+    isOrderOnly?: boolean;
     isActive: boolean;
   }>;
   counterparties: Array<{
@@ -528,6 +530,8 @@ export interface DocumentSummary {
   fiscalCode?: string;
   fiscalUrl?: string;
   comment: string;
+  metaJson?: string;
+  meta?: DocumentMetaDto;
   warehouseName?: string;
   targetWarehouseName?: string;
   counterpartyName?: string;
@@ -606,6 +610,113 @@ export interface UniversalCommitResult {
   categoriesCreated: number;
   pricesApplied: number;
   priceDocNumber: string | null;
+}
+
+export interface ParsedImportCounterparty {
+  name: string;
+  edrpou: string;
+  ipn: string;
+  iban: string;
+  phone: string;
+  email: string;
+  isCustomer: boolean;
+  isSupplier: boolean;
+}
+
+export interface UniversalCounterpartiesParseResult {
+  format: 'EXCEL' | 'CSV' | 'XML' | 'PDF';
+  filename: string;
+  totalDetected: number;
+  warnings: string[];
+  counterparties: ParsedImportCounterparty[];
+}
+
+export interface UniversalCounterpartiesCommitResult {
+  created: number;
+  updated: number;
+  contractsCreated: number;
+}
+
+export interface DocumentMetaDto {
+  orderStatus?: 'NEW' | 'IN_PROGRESS' | 'AWAITING_PAYMENT' | 'READY_TO_SHIP' | 'COMPLETED' | 'CANCELLED';
+  shipmentDate?: string;
+  managerName?: string;
+  projectName?: string;
+  deliveryMethod?: string;
+  deliveryAddress?: string;
+  ttnNumber?: string;
+  paymentTerms?: string;
+  allowNegativeStock?: boolean;
+  isBackorder?: boolean;
+  customFields?: Record<string, string>;
+}
+
+export const ORDER_STATUS_META: Record<
+  NonNullable<DocumentMetaDto['orderStatus']>,
+  { label: string; bgVar: string; inkVar: string }
+> = {
+  NEW: { label: 'Нове', bgVar: 'var(--info-soft)', inkVar: 'var(--info-ink)' },
+  IN_PROGRESS: { label: 'В роботі', bgVar: 'var(--primary-soft)', inkVar: 'var(--primary-ink)' },
+  AWAITING_PAYMENT: { label: 'Очікує оплати', bgVar: 'var(--warn-soft)', inkVar: 'var(--warn-ink)' },
+  READY_TO_SHIP: { label: 'До відвантаження', bgVar: 'var(--violet-soft)', inkVar: 'var(--violet-ink)' },
+  COMPLETED: { label: 'Виконано', bgVar: 'var(--pos-soft)', inkVar: 'var(--pos-ink)' },
+  CANCELLED: { label: 'Скасовано', bgVar: 'var(--neg-soft)', inkVar: 'var(--neg-ink)' },
+};
+
+export interface BasFeaturesConfig {
+  alwaysOpenDocsInModal: boolean;
+  useDepartments: boolean;
+  useProjects: boolean;
+  useCustomDocFields: boolean;
+  allowOrderWithoutStock: boolean;
+  useDiscounts: boolean;
+  useOrderStatuses: boolean;
+  useContracts: boolean;
+  useDeliveryAndTtn: boolean;
+  usePrroCheckbox: boolean;
+  allowNegativeStockGlobal: boolean;
+  useWarehouseReserves: boolean;
+  useBarcodes: boolean;
+  useCrm: boolean;
+  useWorks: boolean;
+  useProductionBom: boolean;
+  useMultiCurrency: boolean;
+  usePayroll: boolean;
+  useVatAccounting: boolean;
+}
+
+export interface DocFieldConfigItem {
+  key: string;
+  label: string;
+  group: 'header' | 'extra' | 'line';
+  visible: boolean;
+  required: boolean;
+}
+
+export interface CustomDocFieldDef {
+  id: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'select';
+  options?: string[];
+  required: boolean;
+}
+
+export interface DocTypeFieldSettings {
+  fields: DocFieldConfigItem[];
+  customFields: CustomDocFieldDef[];
+}
+
+export interface MenuCustomizationConfig {
+  sections: Record<string, { visible?: boolean; label?: string; order?: number }>;
+  items: Record<string, { visible?: boolean; label?: string; pinned?: boolean }>;
+}
+
+export interface BasSettingsDto {
+  organizationId: string;
+  features: BasFeaturesConfig;
+  docFields: Record<DocumentType, DocTypeFieldSettings>;
+  menuConfig: MenuCustomizationConfig;
+  updatedAt: string;
 }
 
 export interface DocumentFull extends DocumentSummary {

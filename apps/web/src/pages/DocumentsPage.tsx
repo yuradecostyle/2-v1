@@ -24,6 +24,7 @@ import {
   DOC_TYPE_META,
   fmtDate,
   fmtMoney,
+  ORDER_STATUS_META,
   type BootstrapData,
   type DocumentSummary,
   type DocumentType,
@@ -549,6 +550,29 @@ export function DocumentsPage({
                       {doc.comment && (
                         <div className="max-w-xs truncate text-[11px] text-slate-400">
                           {doc.comment}
+                        </div>
+                      )}
+                      {(doc.meta?.orderStatus || doc.meta?.isBackorder || doc.meta?.allowNegativeStock) && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {doc.docType === 'customer_order' && doc.meta?.orderStatus && ORDER_STATUS_META[doc.meta.orderStatus] && (
+                            <span
+                              className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                              style={{
+                                background: ORDER_STATUS_META[doc.meta.orderStatus].bgVar,
+                                color: ORDER_STATUS_META[doc.meta.orderStatus].inkVar,
+                              }}
+                            >
+                              {ORDER_STATUS_META[doc.meta.orderStatus].label}
+                            </span>
+                          )}
+                          {(doc.meta?.isBackorder || doc.meta?.allowNegativeStock) && (
+                            <span
+                              className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                              style={{ background: 'var(--warn-soft)', color: 'var(--warn-ink)' }}
+                            >
+                              Під замовлення
+                            </span>
+                          )}
                         </div>
                       )}
                     </td>

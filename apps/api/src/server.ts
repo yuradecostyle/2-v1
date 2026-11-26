@@ -68,6 +68,12 @@ import {
   resetPrintTemplate,
   parseUniversalItemsFile,
   commitUniversalItemsImport,
+  parseUniversalCounterpartiesFile,
+  commitUniversalCounterpartiesImport,
+  getBasSettings,
+  saveBasSettings,
+  resetBasSettings,
+  parseDocumentMeta,
   assertRolePermission,
   assertEffectivePermission,
   canViewDocType,
@@ -1279,10 +1285,13 @@ app.get('/api/bootstrap', async (req) => {
     linesByBom.set(l.bomSpecId, arr);
   }
 
+  const basCfg = await getBasSettings(db, organization.id);
+
   return {
     currentUser: authUser ?? null,
     organization,
     organizations: visibleOrgs,
+    basSettings: basCfg,
     departments: deptScope.visibleDepartments,
     allDepartments: visibleAllDepts,
     activeDepartmentId: deptScope.activeDepartmentId,
@@ -1775,6 +1784,7 @@ app.post('/api/catalogs/items', async (req) => {
       categoryId: z.string().uuid().nullable().optional(),
       unit: z.string().default('шт'),
       itemType: z.enum(['GOODS', 'SERVICE']).default('GOODS'),
+      isOrderOnly: z.boolean().optional().default(false),
     })
     .parse(req.body);
 
@@ -1787,6 +1797,8 @@ app.post('/api/catalogs/counterparties', async (req) => {
     .object({
       name: z.string().min(1),
       edrpou: z.string().optional().default(''),
+      ipn: z.string().optional().default(''),
+      iban: z.string().optional().default(''),
       phone: z.string().optional().default(''),
       email: z.string().optional().default(''),
       isCustomer: z.boolean().default(true),
@@ -1992,6 +2004,7 @@ app.patch('/api/catalogs/items/:id', async (req, reply) => {
       categoryId: z.string().uuid().nullable().optional(),
       unit: z.string().optional(),
       itemType: z.enum(['GOODS', 'SERVICE']).optional(),
+      isOrderOnly: z.boolean().optional(),
       isActive: z.boolean().optional(),
     })
     .parse(req.body);
@@ -2004,6 +2017,7 @@ app.patch('/api/catalogs/items/:id', async (req, reply) => {
       ...(body.categoryId !== undefined ? { categoryId: body.categoryId } : {}),
       ...(body.unit !== undefined ? { unit: body.unit.trim() || 'шт' } : {}),
       ...(body.itemType !== undefined ? { itemType: body.itemType } : {}),
+      ...(body.isOrderOnly !== undefined ? { isOrderOnly: body.isOrderOnly } : {}),
       ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
     })
     .where(eq(items.id, id))
@@ -2144,6 +2158,55 @@ app.post('/api/print-templates/:templateKey/reset', async (req) => {
 });
 
 // ============================================================================
+// НАЛАШТУВАННЯ BAS МАЛИЙ БІЗНЕС (ФУНКЦІОНАЛЬНІ ОПЦІЇ, ПОЛЯ ДОКУМЕНТІВ, МЕНЮ)
+// ============================================================================
+
+app.get('/api/bas-settings', async (req) => {
+  const orgId = await getOrgId(req);
+  return getBasSettings(db, orgId);
+});
+
+app.put('/api/bas-settings', async (req) => {
+  const { role, userName } = getRequestRole(req);
+  const orgId = await getOrgId(req);
+  const body = z
+    .object({
+      features: z.record(z.boolean()).optional(),
+      docFields: z.record(z.any()).optional(),
+      menuConfig: z
+        .object({
+          sections: z.record(z.any()).optional(),
+          items: z.record(z.any()).optional(),
+        })
+        .optional(),
+    })
+    .parse(req.body);
+
+  const updated = await saveBasSettings(db, orgId, body as Parameters<typeof saveBasSettings>[2]);
+
+  await recordAuditLog(db, {
+    organizationId: orgId,
+    userName,
+    userRole: role,
+    action: 'UPDATE_BAS_SETTINGS',
+    entityType: 'bas_settings',
+    summary: 'Оновлено налаштування BAS Малий бізнес (опції, поля документів або меню)',
+  });
+
+  return updated;
+});
+
+app.post('/api/bas-settings/reset', async (req) => {
+  const orgId = await getOrgId(req);
+  const body = z
+    .object({
+      scope: z.enum(['all', 'features', 'docFields', 'menuConfig']).optional().default('all'),
+    })
+    .parse(req.body ?? {});
+  return resetBasSettings(db, orgId, body.scope);
+});
+
+// ============================================================================
 // ДОКУМЕНТИ (DOCUMENTS) + ДРУКОВАНІ ФОРМИ + ПДВ J1201015 + RBAC
 // ============================================================================
 
@@ -2200,6 +2263,7 @@ const docPayloadSchema = z.object({
   vatRate: z.number().optional().default(20),
   totalAmount: z.union([z.number(), z.string()]).optional(),
   comment: z.string().optional().default(''),
+  meta: z.record(z.unknown()).optional(),
   lines: z.array(docLineSchema).optional().default([]),
   autoPost: z.boolean().optional().default(false),
 });
@@ -2275,6 +2339,7 @@ app.get('/api/documents', async (req) => {
     const org = orgMap.get(doc.organizationId);
     return {
       ...doc,
+      meta: parseDocumentMeta(doc.metaJson),
       organizationName: org?.name ?? '',
       organizationEntityType: org?.entityType ?? 'TOV',
       departmentName: doc.departmentId ? (deptMap.get(doc.departmentId) ?? '') : '',
@@ -2359,7 +2424,7 @@ app.get('/api/documents/:id', async (req, reply) => {
     .where(eq(documentLines.documentId, id))
     .orderBy(asc(documentLines.lineNo));
 
-  return { ...doc, lines };
+  return { ...doc, meta: parseDocumentMeta(doc.metaJson), lines };
 });
 
 app.get('/api/documents/:id/print', async (req) => {
@@ -2548,6 +2613,7 @@ app.post('/api/documents', async (req) => {
       discountTotal: computedDiscountTotal,
       totalAmount: computedTotal,
       comment: body.comment,
+      metaJson: JSON.stringify(body.meta ?? {}),
     })
     .returning();
 
@@ -2623,6 +2689,7 @@ app.post('/api/documents/:id/create-invoice-from-order', async (req, reply) => {
       discountTotal: order.discountTotal,
       totalAmount: order.totalAmount,
       comment: `Відвантаження на підставі замовлення №${order.docNumber}`,
+      metaJson: order.metaJson || '{}',
     })
     .returning();
 
@@ -2822,6 +2889,7 @@ app.put('/api/documents/:id', async (req, reply) => {
       discountTotal: computedDiscountTotal,
       totalAmount: computedTotal,
       comment: body.comment,
+      ...(body.meta !== undefined ? { metaJson: JSON.stringify(body.meta) } : {}),
       updatedAt: new Date(),
     })
     .where(eq(documents.id, id));
@@ -3176,6 +3244,7 @@ app.post('/api/documents/:id/create-related', async (req, reply) => {
       discountTotal: isCash ? '0.00' : src.discountTotal,
       totalAmount: src.totalAmount,
       comment: `Створено на підставі №${src.docNumber}`,
+      metaJson: src.metaJson || '{}',
     })
     .returning();
 
@@ -3781,6 +3850,58 @@ app.post('/api/import/items/commit', async (req) => {
 app.post('/api/import/counterparties', async (req) => {
   const body = z.object({ csvText: z.string().min(1) }).parse(req.body);
   return importCounterpartiesFromBasCsv(db, body.csvText);
+});
+
+app.post('/api/import/counterparties/parse-file', async (req) => {
+  const body = z
+    .object({
+      filename: z.string().min(1),
+      contentBase64: z.string().min(1),
+      mimeType: z.string().optional(),
+    })
+    .parse(req.body);
+  return parseUniversalCounterpartiesFile(body);
+});
+
+app.post('/api/import/counterparties/commit', async (req) => {
+  const { role, userName } = getRequestRole(req);
+  const orgId = await getOrgId(req);
+  const body = z
+    .object({
+      counterparties: z
+        .array(
+          z.object({
+            name: z.string().min(1),
+            edrpou: z.string().optional().default(''),
+            ipn: z.string().optional().default(''),
+            iban: z.string().optional().default(''),
+            phone: z.string().optional().default(''),
+            email: z.string().optional().default(''),
+            isCustomer: z.boolean().optional().default(true),
+            isSupplier: z.boolean().optional().default(false),
+          })
+        )
+        .min(1),
+      createDefaultContracts: z.boolean().optional().default(true),
+    })
+    .parse(req.body);
+
+  const result = await commitUniversalCounterpartiesImport(db, {
+    organizationId: orgId,
+    counterparties: body.counterparties,
+    createDefaultContracts: body.createDefaultContracts,
+  });
+
+  await recordAuditLog(db, {
+    organizationId: orgId,
+    userName,
+    userRole: role,
+    action: 'UNIVERSAL_IMPORT_COUNTERPARTIES',
+    entityType: 'counterparties',
+    summary: `Імпорт покупців/контрагентів з файлу: створено ${result.created}, оновлено ${result.updated}, договорів +${result.contractsCreated}`,
+  });
+
+  return result;
 });
 
 app.post('/api/import/opening-balances', async (req) => {

@@ -10,4 +10,5 @@ export * from './crm-assets-fx-service.js';
 export * from './statutory-reports.js';
 export * from './bas-import.js';
 export * from './universal-import.js';
+export * from './bas-settings.js';
 export * from './seed.js';

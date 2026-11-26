@@ -29,6 +29,7 @@ import {
 } from '../lib/api';
 import type { CatalogTabKey } from '../lib/menuConfig';
 import { UniversalItemsImportModal } from '../components/UniversalItemsImportModal';
+import { UniversalCounterpartiesImportModal } from '../components/UniversalCounterpartiesImportModal';
 
 export type CatalogTab = CatalogTabKey;
 
@@ -46,6 +47,7 @@ export function CatalogsPage({
   }, [initialTab]);
   const [search, setSearch] = useState('');
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [cpImportModalOpen, setCpImportModalOpen] = useState(false);
 
   // Quick-add forms
   const [newItem, setNewItem] = useState({
@@ -54,6 +56,7 @@ export function CatalogsPage({
     categoryId: '',
     unit: 'шт',
     itemType: 'GOODS' as 'GOODS' | 'SERVICE',
+    isOrderOnly: false,
   });
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editItemDraft, setEditItemDraft] = useState({
@@ -63,6 +66,7 @@ export function CatalogsPage({
     categoryId: '',
     unit: 'шт',
     itemType: 'GOODS' as 'GOODS' | 'SERVICE',
+    isOrderOnly: false,
   });
 
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -166,7 +170,14 @@ export function CatalogsPage({
           categoryId: newItem.categoryId || null,
         }),
       });
-      setNewItem({ sku: '', name: '', categoryId: '', unit: 'шт', itemType: 'GOODS' });
+      setNewItem({
+        sku: '',
+        name: '',
+        categoryId: '',
+        unit: 'шт',
+        itemType: 'GOODS',
+        isOrderOnly: false,
+      });
       setMsg('Номенклатуру додано');
       refresh();
     } catch (e) {
@@ -183,6 +194,7 @@ export function CatalogsPage({
       categoryId: it.categoryId || '',
       unit: it.unit,
       itemType: it.itemType,
+      isOrderOnly: Boolean(it.isOrderOnly),
     });
   };
 
@@ -474,18 +486,33 @@ export function CatalogsPage({
             рахунки, статті РГК та редаговані бланки UA
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setImportModalOpen(true)}
-          className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-extrabold shadow-xs transition"
-          style={{
-            background: 'linear-gradient(135deg, var(--primary), var(--primary-2))',
-            color: 'var(--surface)',
-          }}
-        >
-          <Upload className="h-4 w-4" />
-          <span>Імпорт номенклатури (PDF / XLS / CSV / XML)</span>
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setCpImportModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-extrabold shadow-xs transition"
+            style={{
+              background: 'var(--pos-soft)',
+              color: 'var(--pos-ink)',
+              border: '1px solid var(--pos)',
+            }}
+          >
+            <Users className="h-4 w-4" />
+            <span>Імпорт покупців / контрагентів</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setImportModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-extrabold shadow-xs transition"
+            style={{
+              background: 'linear-gradient(135deg, var(--primary), var(--primary-2))',
+              color: 'var(--surface)',
+            }}
+          >
+            <Upload className="h-4 w-4" />
+            <span>Імпорт номенклатури (PDF / XLS / CSV / XML)</span>
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -584,12 +611,12 @@ export function CatalogsPage({
                 </option>
               ))}
             </select>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <input
                 placeholder="Од."
                 value={newItem.unit}
                 onChange={(e) => setNewItem((s) => ({ ...s, unit: e.target.value }))}
-                className="w-16 rounded-lg border border-slate-300 px-2 py-2 text-xs"
+                className="w-14 rounded-lg border border-slate-300 px-2 py-2 text-xs"
               />
               <select
                 value={newItem.itemType}
@@ -602,12 +629,22 @@ export function CatalogsPage({
                 <option value="SERVICE">Послуга</option>
               </select>
             </div>
-            <button
-              type="submit"
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
-            >
-              <Plus className="h-3.5 w-3.5" /> Додати
-            </button>
+            <div className="flex items-center gap-2">
+              <label className="flex cursor-pointer items-center gap-1 text-[11px] font-semibold text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={newItem.isOrderOnly}
+                  onChange={(e) => setNewItem((s) => ({ ...s, isOrderOnly: e.target.checked }))}
+                />
+                <span>Під замовл.</span>
+              </label>
+              <button
+                type="submit"
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
+              >
+                <Plus className="h-3.5 w-3.5" /> Додати
+              </button>
+            </div>
           </form>
 
           <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-xs">
@@ -704,31 +741,56 @@ export function CatalogsPage({
                         </td>
                         <td className="px-4 py-2.5">
                           {editing ? (
-                            <select
-                              value={editItemDraft.itemType}
-                              onChange={(e) =>
-                                setEditItemDraft((s) => ({
-                                  ...s,
-                                  itemType: e.target.value as 'GOODS' | 'SERVICE',
-                                }))
-                              }
-                              className="rounded border border-indigo-300 px-1.5 py-1 text-xs"
-                            >
-                              <option value="GOODS">Товар</option>
-                              <option value="SERVICE">Послуга</option>
-                            </select>
+                            <div className="flex flex-col gap-1">
+                              <select
+                                value={editItemDraft.itemType}
+                                onChange={(e) =>
+                                  setEditItemDraft((s) => ({
+                                    ...s,
+                                    itemType: e.target.value as 'GOODS' | 'SERVICE',
+                                  }))
+                                }
+                                className="rounded border border-indigo-300 px-1.5 py-1 text-xs"
+                              >
+                                <option value="GOODS">Товар</option>
+                                <option value="SERVICE">Послуга</option>
+                              </select>
+                              <label className="flex items-center gap-1 text-[10px] font-semibold">
+                                <input
+                                  type="checkbox"
+                                  checked={editItemDraft.isOrderOnly}
+                                  onChange={(e) =>
+                                    setEditItemDraft((s) => ({
+                                      ...s,
+                                      isOrderOnly: e.target.checked,
+                                    }))
+                                  }
+                                />
+                                Під замовлення (в мінус)
+                              </label>
+                            </div>
                           ) : (
-                            <span
-                              className="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                              style={{
-                                background:
-                                  it.itemType === 'GOODS' ? 'var(--info-soft)' : 'var(--violet-soft)',
-                                color:
-                                  it.itemType === 'GOODS' ? 'var(--info-ink)' : 'var(--violet-ink)',
-                              }}
-                            >
-                              {it.itemType === 'GOODS' ? 'Товар' : 'Послуга'}
-                            </span>
+                            <div className="flex flex-wrap gap-1">
+                              <span
+                                className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                                style={{
+                                  background:
+                                    it.itemType === 'GOODS' ? 'var(--info-soft)' : 'var(--violet-soft)',
+                                  color:
+                                    it.itemType === 'GOODS' ? 'var(--info-ink)' : 'var(--violet-ink)',
+                                }}
+                              >
+                                {it.itemType === 'GOODS' ? 'Товар' : 'Послуга'}
+                              </span>
+                              {it.isOrderOnly && (
+                                <span
+                                  className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                                  style={{ background: 'var(--warn-soft)', color: 'var(--warn-ink)' }}
+                                >
+                                  Під замовлення
+                                </span>
+                              )}
+                            </div>
                           )}
                         </td>
                         <td className="px-3 py-2.5 text-right">
@@ -1842,16 +1904,27 @@ export function CatalogsPage({
         </div>
       )}
 
-      {/* Universal Import Modal */}
+      {/* Universal Import Modals */}
       {importModalOpen && (
         <UniversalItemsImportModal
           bootstrap={bootstrap}
           onClose={() => setImportModalOpen(false)}
           onImported={(res) => {
             setMsg(
-              `Імпорт завершено: додано ${res.created}, оновлено ${res.updated}, категорій +${res.categoriesCreated}${
+              `Імпорт номенклатури завершено: додано ${res.created}, оновлено ${res.updated}, категорій +${res.categoriesCreated}${
                 res.priceDocNumber ? `, прайс-лист №${res.priceDocNumber}` : ''
               }`
+            );
+          }}
+        />
+      )}
+
+      {cpImportModalOpen && (
+        <UniversalCounterpartiesImportModal
+          onClose={() => setCpImportModalOpen(false)}
+          onImported={(res) => {
+            setMsg(
+              `Імпорт покупців/контрагентів завершено: додано ${res.created}, оновлено ${res.updated}, створено договорів: ${res.contractsCreated}`
             );
           }}
         />
