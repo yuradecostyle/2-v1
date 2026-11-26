@@ -425,6 +425,8 @@ export interface BootstrapData {
     id: string;
     name: string;
     edrpou: string;
+    ipn?: string;
+    iban?: string;
     phone: string;
     email: string;
     isCustomer: boolean;
@@ -519,6 +521,7 @@ export interface DocumentSummary {
   cashflowCategoryId: string | null;
   priceTypeId: string | null;
   vatRate?: number;
+  discountTotal?: string;
   totalAmount: string;
   vatAmount?: string;
   fiscalReceiptId?: string;
@@ -543,6 +546,8 @@ export interface DocumentLineDto {
   qty: string | number;
   diffQty?: string | number;
   price: string | number;
+  discountPercent?: string | number;
+  discountAmount?: string | number;
   amount: string | number;
   costAmount?: string;
   taxAmount?: string;
@@ -552,6 +557,55 @@ export interface DocumentLineDto {
   counterpartyId?: string | null;
   cashAccountId?: string | null;
   notes?: string;
+}
+
+export interface PrintTemplateDto {
+  id: string;
+  organizationId: string;
+  templateKey: string;
+  docType: string;
+  name: string;
+  standardCode: string;
+  titleText: string;
+  subtitleText: string;
+  headerNote: string;
+  footerNote: string;
+  signLeftLabel: string;
+  signRightLabel: string;
+  showDiscountColumn: boolean;
+  showVatBlock: boolean;
+  showIbanBlock: boolean;
+  showStampArea: boolean;
+  showSkuColumn: boolean;
+  isSystem: boolean;
+  updatedAt?: string;
+}
+
+export interface ParsedImportItem {
+  sku: string;
+  name: string;
+  categoryName: string;
+  unit: string;
+  price: number;
+  barcode: string;
+  itemType: 'GOODS' | 'SERVICE';
+  rawSource?: string;
+}
+
+export interface UniversalParseResult {
+  format: 'EXCEL' | 'CSV' | 'XML' | 'PDF';
+  filename: string;
+  totalDetected: number;
+  warnings: string[];
+  items: ParsedImportItem[];
+}
+
+export interface UniversalCommitResult {
+  created: number;
+  updated: number;
+  categoriesCreated: number;
+  pricesApplied: number;
+  priceDocNumber: string | null;
 }
 
 export interface DocumentFull extends DocumentSummary {

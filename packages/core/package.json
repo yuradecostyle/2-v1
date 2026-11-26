@@ -18,7 +18,10 @@
     "@electric-sql/pglite": "^0.3.14",
     "decimal.js": "^10.5.0",
     "drizzle-orm": "^0.41.0",
+    "fast-xml-parser": "^5.12.1",
     "pg": "^8.14.1",
+    "unpdf": "^2.2.3",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.2"
   },
   "devDependencies": {

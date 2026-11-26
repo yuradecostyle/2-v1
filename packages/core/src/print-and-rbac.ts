@@ -1,4 +1,4 @@
-import { asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import type { AppDb } from './db.js';
 import {
   appUsers,
@@ -11,6 +11,7 @@ import {
   employees,
   items,
   organizations,
+  printTemplates,
   warehouses,
   type DocumentType,
   type UserRole,
@@ -124,7 +125,345 @@ export function amountToUkrainianWords(value: number | string): string {
 }
 
 // ============================================================================
-// 2. ДРУКОВАНІ ФОРМИ ДОКУМЕНТІВ (РАХУНОК, ВИДАТКОВА, АКТ, ТТН, ІНВЕНТАРИЗАЦІЯ, ВІДОМІСТЬ)
+// 2. СТАНДАРТНІ УКРАЇНСЬКІ БУХГАЛТЕРСЬКІ ДРУКОВАНІ ФОРМИ (РЕДАГОВАНІ ШАБЛОНИ)
+// ============================================================================
+
+export interface PrintTemplateSpec {
+  templateKey: string;
+  docType: string;
+  name: string;
+  standardCode: string;
+  titleText: string;
+  subtitleText: string;
+  headerNote: string;
+  footerNote: string;
+  signLeftLabel: string;
+  signRightLabel: string;
+  showDiscountColumn: boolean;
+  showVatBlock: boolean;
+  showIbanBlock: boolean;
+  showStampArea: boolean;
+  showSkuColumn: boolean;
+}
+
+export const UA_STANDARD_PRINT_TEMPLATES: PrintTemplateSpec[] = [
+  {
+    templateKey: 'invoice_payment',
+    docType: 'customer_order',
+    name: 'Рахунок на оплату (Стандарт України)',
+    standardCode: 'Типова форма рахунку-фактури (IBAN / ЄДРПОУ)',
+    titleText: 'РАХУНОК НА ОПЛАТУ № {{docNumber}} від {{docDate}} р.',
+    subtitleText: 'Дійсний для оплати протягом 3 банківських днів',
+    headerNote:
+      'Увага! Оплата цього рахунку означає погодження з умовами поставки товарів (надання послуг). Повідомлення про оплату є обов’язковим.',
+    footerNote:
+      'Призначення платежу: Оплата згідно з рахунком № {{docNumber}} від {{docDate}} р.',
+    signLeftLabel: 'Виписав(ла) / Постачальник',
+    signRightLabel: 'Керівник / Головний бухгалтер',
+    showDiscountColumn: true,
+    showVatBlock: true,
+    showIbanBlock: true,
+    showStampArea: true,
+    showSkuColumn: true,
+  },
+  {
+    templateKey: 'sales_waybill',
+    docType: 'sales_invoice',
+    name: 'Видаткова накладна (Форма № М-11 / Стандарт України)',
+    standardCode: 'Первинний документ обліку реалізації (ЗУ «Про бухоблік» №996-XIV)',
+    titleText: 'ВИДАТКОВА НАКЛАДНА № {{docNumber}} від {{docDate}} р.',
+    subtitleText: 'Підстава: Основний договір / Замовлення покупця',
+    headerNote: 'Місце складання документа: {{orgAddress}} · Склад відвантаження: {{warehouseName}}',
+    footerNote:
+      'Товар відпущено у повному обсязі, належної якості та комплектності. Претензій щодо кількості й зовнішнього вигляду немає.',
+    signLeftLabel: 'Відпустив(ла) (Постачальник)',
+    signRightLabel: 'Отримав(ла) (Покупець / за довіреністю)',
+    showDiscountColumn: true,
+    showVatBlock: true,
+    showIbanBlock: true,
+    showStampArea: true,
+    showSkuColumn: true,
+  },
+  {
+    templateKey: 'work_act',
+    docType: 'sales_invoice',
+    name: 'Акт наданих послуг / виконаних робіт',
+    standardCode: 'Первинний документ (ст. 9 ЗУ «Про бухоблік та фінзвітність»)',
+    titleText: 'АКТ здачі-прийняття робіт (надання послуг) № {{docNumber}} від {{docDate}} р.',
+    subtitleText: 'Місце складання: {{orgAddress}}',
+    headerNote:
+      'Ми, що нижче підписалися, представник Виконавця {{orgName}} та представник Замовника {{counterpartyName}}, склали цей Акт про те, що Виконавцем належним чином виконано наступні роботи (надано послуги):',
+    footerNote:
+      'Усі роботи (послуги) виконані повністю і в строк. Замовник претензій по об’єму, якості та строкам виконання робіт (надання послуг) не має.',
+    signLeftLabel: 'Від Виконавця',
+    signRightLabel: 'Від Замовника',
+    showDiscountColumn: true,
+    showVatBlock: true,
+    showIbanBlock: true,
+    showStampArea: true,
+    showSkuColumn: false,
+  },
+  {
+    templateKey: 'ttn_waybill',
+    docType: 'sales_invoice',
+    name: 'Товарно-транспортна накладна (ТТН — Форма № 1-ТН)',
+    standardCode: 'Форма № 1-ТН (Додаток 7 до Правил перевезень, Наказ Мінінфраструктури №363 / №413)',
+    titleText: 'ТОВАРНО-ТРАНСПОРТНА НАКЛАДНА № {{docNumber}} від {{docDate}} р.',
+    subtitleText: 'Автомобіль: ________________ · Водій: ________________ · Посвідчення: __________',
+    headerNote:
+      'Пункт навантаження: {{warehouseName}} ({{orgAddress}}) · Пункт розвантаження: за адресою вантажоодержувача {{counterpartyName}}.',
+    footerNote:
+      'Здав (відповідальна особа вантажовідправника) / Прийняв до перевезення (водій-експедитор) / Прийняв вантажоодержувач. Вантаж доставлено без пошкоджень.',
+    signLeftLabel: 'Здав (Вантажовідправник)',
+    signRightLabel: 'Прийняв (Водій / Вантажоодержувач)',
+    showDiscountColumn: false,
+    showVatBlock: true,
+    showIbanBlock: false,
+    showStampArea: true,
+    showSkuColumn: true,
+  },
+  {
+    templateKey: 'pko_cash_in',
+    docType: 'money_in',
+    name: 'Прибутковий касовий ордер (ПКО — Форма № КО-1)',
+    standardCode: 'Типова форма № КО-1 (Додаток 2 до Положення НБУ №148 від 29.12.2017)',
+    titleText: 'ПРИБУТКОВИЙ КАСОВИЙ ОРДЕР № {{docNumber}} від {{docDate}} р.',
+    subtitleText: 'Кореспондуючий рахунок: Дт 301 (Каса) / Кт 361 (Покупці)',
+    headerNote: 'Прийнято від: {{counterpartyName}} · Підстава: {{comment}}',
+    footerNote:
+      'КВИТАНЦІЯ до прибуткового касового ордера № {{docNumber}} від {{docDate}} р. Прийнято від {{counterpartyName}} суму: {{totalWords}}. М.П. (штамп касира).',
+    signLeftLabel: 'Головний бухгалтер',
+    signRightLabel: 'Одержав касир',
+    showDiscountColumn: false,
+    showVatBlock: true,
+    showIbanBlock: false,
+    showStampArea: true,
+    showSkuColumn: false,
+  },
+  {
+    templateKey: 'vko_cash_out',
+    docType: 'money_out',
+    name: 'Видатковий касовий ордер (ВКО — Форма № КО-2)',
+    standardCode: 'Типова форма № КО-2 (Додаток 3 до Положення НБУ №148 від 29.12.2017)',
+    titleText: 'ВИДАТКОВИЙ КАСОВИЙ ОРДЕР № {{docNumber}} від {{docDate}} р.',
+    subtitleText: 'Кореспондуючий рахунок: Дт 631 / 661 / 92 · Кт 301 (Каса)',
+    headerNote: 'Видати: {{counterpartyName}} · Підстава: {{comment}}',
+    footerNote:
+      'Одержав(ла): {{totalWords}}. Дата: «___» __________ 20___ р. Підпис одержувача: ____________. За документом (паспорт/ID): серія ___ № __________, виданий ________________.',
+    signLeftLabel: 'Керівник / Головний бухгалтер',
+    signRightLabel: 'Видав касир / Одержав(ла)',
+    showDiscountColumn: false,
+    showVatBlock: false,
+    showIbanBlock: false,
+    showStampArea: true,
+    showSkuColumn: false,
+  },
+  {
+    templateKey: 'goods_receipt_m4',
+    docType: 'goods_receipt',
+    name: 'Прибуткова накладна / Прибутковий ордер (Форма № М-4)',
+    standardCode: 'Типова форма № М-4 (Оприбуткування товарно-матеріальних цінностей)',
+    titleText: 'ПРИБУТКОВА НАКЛАДНА (ОРДЕР М-4) № {{docNumber}} від {{docDate}} р.',
+    subtitleText: 'Склад приймання: {{warehouseName}}',
+    headerNote: 'Прийнято на відповідальне зберігання від постачальника {{counterpartyName}}.',
+    footerNote: 'Товар прийнято за кількістю та якістю і оприбутковано на склад за методом FIFO.',
+    signLeftLabel: 'Здав (Постачальник)',
+    signRightLabel: 'Прийняв (Комірник / МВО)',
+    showDiscountColumn: true,
+    showVatBlock: true,
+    showIbanBlock: false,
+    showStampArea: true,
+    showSkuColumn: true,
+  },
+  {
+    templateKey: 'inventory_inv1',
+    docType: 'inventory_count',
+    name: 'Інвентаризаційний опис ТМЦ (Наказ Мінфіну №572)',
+    standardCode: 'Положення про інвентаризацію активів та зобов’язань (Наказ Мінфіну №879 / №572)',
+    titleText: 'ІНВЕНТАРИЗАЦІЙНИЙ ОПИС ТОВАРНО-МАТЕРІАЛЬНИХ ЦІННОСТЕЙ № {{docNumber}} від {{docDate}} р.',
+    subtitleText: 'Місце зберігання (Склад): {{warehouseName}}',
+    headerNote:
+      'Інвентаризаційна комісія провела фактичний підрахунок залишків ТМЦ та звірила його з даними бухгалтерського обліку.',
+    footerNote:
+      'Усі цінності, пойменовані в цьому інвентаризаційному описі, комісією перевірені в натурі в моїй присутності та внесені до опису, у зв’язку з чим претензій до інвентаризаційної комісії не маю.',
+    signLeftLabel: 'Голова та члени інвентаризаційної комісії',
+    signRightLabel: 'Матеріально відповідальна особа (МВО)',
+    showDiscountColumn: false,
+    showVatBlock: false,
+    showIbanBlock: false,
+    showStampArea: true,
+    showSkuColumn: true,
+  },
+  {
+    templateKey: 'payroll_p6',
+    docType: 'payroll_sheet',
+    name: 'Розрахунково-платіжна відомість (Форма № П-6 / П-7)',
+    standardCode: 'Типова форма № П-6 / П-7 (Наказ Держкомстату №489 · ПДФО 18% · ВЗ 5% · ЄСВ 22%)',
+    titleText: 'РОЗРАХУНКОВО-ПЛАТІЖНА ВІДОМІСТЬ № {{docNumber}} від {{docDate}} р.',
+    subtitleText: 'Утримання: ПДФО 18%, Військовий збір 5% · Нарахування роботодавця: ЄСВ 22%',
+    headerNote: 'Відомість нарахування та виплати заробітної плати штатним працівникам {{orgName}}.',
+    footerNote: 'До виплати у строк. Податки та ЄСВ підлягають перерахуванню одночасно з виплатою.',
+    signLeftLabel: 'Керівник підприємства',
+    signRightLabel: 'Головний бухгалтер',
+    showDiscountColumn: false,
+    showVatBlock: false,
+    showIbanBlock: false,
+    showStampArea: true,
+    showSkuColumn: false,
+  },
+  {
+    templateKey: 'tax_invoice_ua',
+    docType: 'tax_invoice',
+    name: 'Податкова накладна ПДВ (Наказ Мінфіну №1307 / J1201015)',
+    standardCode: 'Форма Податкової накладної (Наказ Мінфіну України №1307 · Електронний формат J1201015)',
+    titleText: 'ПОДАТКОВА НАКЛАДНА № {{docNumber}} від {{docDate}} р.',
+    subtitleText: 'Підлягає реєстрації в Єдиному реєстрі податкових накладних (ЄРПН)',
+    headerNote:
+      'Постачальник (продавець): {{orgName}} (ІПН {{orgIpn}}) · Отримувач (покупець): {{counterpartyName}}.',
+    footerNote:
+      'Документ сформовано відповідно до вимог Податкового кодексу України. Доступне вивантаження XML J1201015 для ЄРПН / M.E.Doc / Кабінету платника.',
+    signLeftLabel: 'Керівник / Уповноважена особа (КЕП)',
+    signRightLabel: 'Головний бухгалтер',
+    showDiscountColumn: true,
+    showVatBlock: true,
+    showIbanBlock: false,
+    showStampArea: true,
+    showSkuColumn: true,
+  },
+];
+
+export async function ensureDefaultPrintTemplates(db: AppDb, organizationId: string) {
+  const existing = await db
+    .select()
+    .from(printTemplates)
+    .where(eq(printTemplates.organizationId, organizationId))
+    .orderBy(asc(printTemplates.templateKey));
+
+  const existingKeys = new Set(existing.map((t) => t.templateKey));
+  const missing = UA_STANDARD_PRINT_TEMPLATES.filter((t) => !existingKeys.has(t.templateKey));
+
+  if (missing.length > 0) {
+    await db.insert(printTemplates).values(
+      missing.map((m) => ({
+        organizationId,
+        ...m,
+        isSystem: true,
+      }))
+    );
+    return db
+      .select()
+      .from(printTemplates)
+      .where(eq(printTemplates.organizationId, organizationId))
+      .orderBy(asc(printTemplates.templateKey));
+  }
+  return existing;
+}
+
+export async function getPrintTemplates(db: AppDb, organizationId: string) {
+  return ensureDefaultPrintTemplates(db, organizationId);
+}
+
+export async function savePrintTemplate(
+  db: AppDb,
+  params: {
+    organizationId: string;
+    templateKey: string;
+    docType?: string;
+    name?: string;
+    standardCode?: string;
+    titleText?: string;
+    subtitleText?: string;
+    headerNote?: string;
+    footerNote?: string;
+    signLeftLabel?: string;
+    signRightLabel?: string;
+    showDiscountColumn?: boolean;
+    showVatBlock?: boolean;
+    showIbanBlock?: boolean;
+    showStampArea?: boolean;
+    showSkuColumn?: boolean;
+  }
+) {
+  await ensureDefaultPrintTemplates(db, params.organizationId);
+  const [existing] = await db
+    .select()
+    .from(printTemplates)
+    .where(
+      and(
+        eq(printTemplates.organizationId, params.organizationId),
+        eq(printTemplates.templateKey, params.templateKey)
+      )
+    )
+    .limit(1);
+
+  if (existing) {
+    const [updated] = await db
+      .update(printTemplates)
+      .set({
+        ...(params.name !== undefined ? { name: params.name.trim() } : {}),
+        ...(params.standardCode !== undefined ? { standardCode: params.standardCode.trim() } : {}),
+        ...(params.titleText !== undefined ? { titleText: params.titleText } : {}),
+        ...(params.subtitleText !== undefined ? { subtitleText: params.subtitleText } : {}),
+        ...(params.headerNote !== undefined ? { headerNote: params.headerNote } : {}),
+        ...(params.footerNote !== undefined ? { footerNote: params.footerNote } : {}),
+        ...(params.signLeftLabel !== undefined ? { signLeftLabel: params.signLeftLabel } : {}),
+        ...(params.signRightLabel !== undefined ? { signRightLabel: params.signRightLabel } : {}),
+        ...(params.showDiscountColumn !== undefined
+          ? { showDiscountColumn: params.showDiscountColumn }
+          : {}),
+        ...(params.showVatBlock !== undefined ? { showVatBlock: params.showVatBlock } : {}),
+        ...(params.showIbanBlock !== undefined ? { showIbanBlock: params.showIbanBlock } : {}),
+        ...(params.showStampArea !== undefined ? { showStampArea: params.showStampArea } : {}),
+        ...(params.showSkuColumn !== undefined ? { showSkuColumn: params.showSkuColumn } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(printTemplates.id, existing.id))
+      .returning();
+    return updated;
+  }
+
+  const [created] = await db
+    .insert(printTemplates)
+    .values({
+      organizationId: params.organizationId,
+      templateKey: params.templateKey,
+      docType: params.docType ?? 'sales_invoice',
+      name: params.name?.trim() || 'Користувацька друкована форма',
+      standardCode: params.standardCode ?? '',
+      titleText: params.titleText || 'ДОКУМЕНТ № {{docNumber}} від {{docDate}} р.',
+      subtitleText: params.subtitleText ?? '',
+      headerNote: params.headerNote ?? '',
+      footerNote: params.footerNote ?? '',
+      signLeftLabel: params.signLeftLabel ?? 'Відпустив(ла)',
+      signRightLabel: params.signRightLabel ?? 'Отримав(ла)',
+      showDiscountColumn: params.showDiscountColumn ?? true,
+      showVatBlock: params.showVatBlock ?? true,
+      showIbanBlock: params.showIbanBlock ?? true,
+      showStampArea: params.showStampArea ?? true,
+      showSkuColumn: params.showSkuColumn ?? true,
+      isSystem: false,
+    })
+    .returning();
+  return created;
+}
+
+export async function resetPrintTemplate(
+  db: AppDb,
+  organizationId: string,
+  templateKey: string
+) {
+  const def = UA_STANDARD_PRINT_TEMPLATES.find((t) => t.templateKey === templateKey);
+  if (!def) {
+    throw new PostingError('NOT_FOUND', 'Стандартний український взірець для цього ключа не знайдено');
+  }
+  return savePrintTemplate(db, {
+    organizationId,
+    ...def,
+  });
+}
+
+// ============================================================================
+// 2.1 ДРУКОВАНІ ФОРМИ ДОКУМЕНТІВ (РАХУНОК, ВИДАТКОВА, АКТ, ТТН, ПКО/ВКО, ІНВЕНТАРИЗАЦІЯ, ЗП)
 // ============================================================================
 
 export async function getPrintableDocumentData(db: AppDb, documentId: string) {
@@ -133,7 +472,7 @@ export async function getPrintableDocumentData(db: AppDb, documentId: string) {
     throw new PostingError('DOCUMENT_NOT_FOUND', 'Документ для друку не знайдено');
   }
 
-  const [[org], lines, allItems, allEmp, allWh, allCp, allAcc, allCf] = await Promise.all([
+  const [[org], lines, allItems, allEmp, allWh, allCp, allAcc, allCf, templates] = await Promise.all([
     db.select().from(organizations).where(eq(organizations.id, doc.organizationId)),
     db
       .select()
@@ -146,6 +485,7 @@ export async function getPrintableDocumentData(db: AppDb, documentId: string) {
     db.select().from(counterparties),
     db.select().from(cashAccounts).where(eq(cashAccounts.organizationId, doc.organizationId)),
     db.select().from(cashflowCategories),
+    ensureDefaultPrintTemplates(db, doc.organizationId),
   ]);
 
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
@@ -162,7 +502,43 @@ export async function getPrintableDocumentData(db: AppDb, documentId: string) {
   const wh = doc.warehouseId ? whMap.get(doc.warehouseId) : undefined;
   const targetWh = doc.targetWarehouseId ? whMap.get(doc.targetWarehouseId) : undefined;
 
+  const enrichedLines = lines.map((l) => {
+    const it = l.itemId ? itemMap.get(l.itemId) : undefined;
+    const emp = l.employeeId ? empMap.get(l.employeeId) : undefined;
+    const qtyNum = d(l.qty);
+    const priceNum = d(l.price);
+    const grossLine = round2(qtyNum.mul(priceNum));
+    const discPct = round2(l.discountPercent ?? 0);
+    const discAmt =
+      d(l.discountAmount ?? 0).gt(0)
+        ? round2(l.discountAmount)
+        : discPct.gt(0)
+          ? round2(grossLine.mul(discPct).div(100))
+          : d(0);
+    return {
+      ...l,
+      grossLineAmount: toNumeric2(grossLine),
+      discountPercent: toNumeric2(discPct),
+      discountAmount: toNumeric2(discAmt),
+      itemSku: it?.sku ?? '',
+      itemName: it?.name ?? emp?.fullName ?? l.notes ?? '',
+      unit: it?.unit ?? (emp ? 'міс' : 'шт'),
+      itemType: it?.itemType ?? 'GOODS',
+      employeePosition: emp?.position ?? '',
+      employeeRnokpp: emp?.rnokpp ?? '',
+    };
+  });
+
+  const discountSumFromLines = enrichedLines.reduce(
+    (acc, l) => acc.plus(d(l.discountAmount)),
+    d(0)
+  );
+  const discountTotal = d(doc.discountTotal ?? 0).gt(0)
+    ? round2(doc.discountTotal)
+    : round2(discountSumFromLines);
+
   const gross = round2(doc.totalAmount);
+  const subtotalBeforeDiscount = round2(gross.plus(discountTotal));
   const vatRate = org.isVatPayer ? (doc.vatRate ?? 20) : 0;
   const vat =
     d(doc.vatAmount).gt(0)
@@ -176,8 +552,8 @@ export async function getPrintableDocumentData(db: AppDb, documentId: string) {
     document: doc,
     organization: {
       ...org,
-      iban: org.iban || mainBank?.iban || 'UA213052990000026007015012345',
-      bankName: org.bankName || mainBank?.name || 'АТ КБ «ПриватБанк»',
+      iban: org.iban || mainBank?.iban || '',
+      bankName: org.bankName || mainBank?.name || '',
     },
     counterparty: cp ?? null,
     warehouseName: wh?.name ?? '',
@@ -192,26 +568,18 @@ export async function getPrintableDocumentData(db: AppDb, documentId: string) {
         }
       : null,
     cashflowCategoryName: docCf?.name ?? '',
+    templates,
     totals: {
+      subtotalBeforeDiscount: toNumeric2(subtotalBeforeDiscount),
+      discountTotal: toNumeric2(discountTotal),
+      hasDiscount: discountTotal.gt(0),
       netAmount: toNumeric2(net),
       vatRate,
       vatAmount: toNumeric2(vat),
       grossAmount: toNumeric2(gross),
       amountInWords: amountToUkrainianWords(toNumeric2(gross)),
     },
-    lines: lines.map((l) => {
-      const it = l.itemId ? itemMap.get(l.itemId) : undefined;
-      const emp = l.employeeId ? empMap.get(l.employeeId) : undefined;
-      return {
-        ...l,
-        itemSku: it?.sku ?? '',
-        itemName: it?.name ?? emp?.fullName ?? l.notes ?? '',
-        unit: it?.unit ?? (emp ? 'міс' : 'шт'),
-        itemType: it?.itemType ?? 'GOODS',
-        employeePosition: emp?.position ?? '',
-        employeeRnokpp: emp?.rnokpp ?? '',
-      };
-    }),
+    lines: enrichedLines,
   };
 }
 
@@ -455,8 +823,9 @@ export function assertEffectivePermission(
     const reqPerm = requiredPermissionForDocType(docType);
     // Додаткова гнучкість: менеджер з продажу може вносити money_in/price_setting; закупівельник — money_out/price_setting
     const allowedByAlias =
-      (docType === 'money_in' && perms.sales) ||
-      (docType === 'money_out' && perms.purchases) ||
+      (docType === 'tax_invoice' && perms.accounting) ||
+      (docType === 'money_in' && (perms.sales || perms.accounting)) ||
+      (docType === 'money_out' && (perms.purchases || perms.accounting)) ||
       (docType === 'price_setting' && (perms.sales || perms.purchases)) ||
       (docType === 'goods_receipt' && perms.warehouse);
     if (!perms[reqPerm] && !allowedByAlias) {

@@ -20,6 +20,7 @@ import {
   KeyRound,
   Network,
   Lock,
+  BookOpenCheck,
 } from 'lucide-react';
 import {
   apiFetch,
@@ -140,6 +141,14 @@ const DOCK_ACTIONS: Array<{
     bgVar: 'var(--violet-soft)',
     inkVar: 'var(--violet-ink)',
   },
+  {
+    label: 'Проводка Дт/Кт',
+    docType: 'manual_journal',
+    reqPerm: 'accounting',
+    icon: BookOpenCheck,
+    bgVar: 'var(--primary-soft)',
+    inkVar: 'var(--primary-ink)',
+  },
 ];
 
 function canAccessSection(sectionId: TopSectionKey, perms?: PermissionMap): boolean {
@@ -163,8 +172,10 @@ function canAccessSection(sectionId: TopSectionKey, perms?: PermissionMap): bool
       return Boolean(perms.money);
     case 'hr':
       return Boolean(perms.hr);
+    case 'accounting':
+      return Boolean(perms.accounting);
     case 'company':
-      return Boolean(perms.accounting || perms.canManageOrgs);
+      return Boolean(perms.canManageOrgs || perms.reports || perms.catalogs);
     case 'settings':
       return Boolean(perms.canManageUsers || perms.canManageOrgs || perms.integrations);
     case 'integrations':
@@ -414,11 +425,11 @@ function ErpShell({
       dashboard: 'dashboard',
       crm: 'crm',
       documents: 'sales',
-      assets: 'money',
-      accounting: 'company',
-      statutory: 'company',
+      assets: 'accounting',
+      accounting: 'accounting',
+      statutory: 'accounting',
       reports: 'company',
-      catalogs: 'warehouse',
+      catalogs: 'company',
       service: 'integrations',
     };
     setPage(targetPage);
@@ -1119,7 +1130,18 @@ function ErpShell({
             />
           )}
           {page === 'assets' && <AssetsAndCurrencyPage />}
-          {page === 'accounting' && <AccountingPage bootstrap={bootstrap} />}
+          {page === 'accounting' && (
+            <AccountingPage
+              bootstrap={bootstrap}
+              onOpenStatutory={() => navigateSimplePage('statutory', 'accounting')}
+              onOpenAssets={() => navigateSimplePage('assets', 'accounting')}
+              onOpenDocType={(dt) => {
+                setDocInitialType(dt);
+                setPage('documents');
+                setActiveCtx({ sectionId: 'accounting' });
+              }}
+            />
+          )}
           {page === 'statutory' && <StatutoryReportsPage />}
           {page === 'reports' && <ReportsPage bootstrap={bootstrap} />}
           {page === 'catalogs' && (

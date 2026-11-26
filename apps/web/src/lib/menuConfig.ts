@@ -10,15 +10,29 @@ export type TopSectionKey =
   | 'production'
   | 'money'
   | 'hr'
+  | 'accounting'
   | 'company'
   | 'settings'
   | 'integrations';
+
+export type CatalogTabKey =
+  | 'items'
+  | 'categories'
+  | 'counterparties'
+  | 'contracts'
+  | 'employees'
+  | 'departments'
+  | 'bom'
+  | 'warehouses'
+  | 'accounts'
+  | 'finance'
+  | 'templates';
 
 export type TargetRoute =
   | { kind: 'dashboard' }
   | { kind: 'crm' }
   | { kind: 'documents'; docType?: DocumentType | ''; createType?: DocumentType }
-  | { kind: 'catalogs'; tab?: 'items' | 'counterparties' | 'employees' | 'departments' | 'bom' | 'warehouses' | 'accounts' }
+  | { kind: 'catalogs'; tab?: CatalogTabKey }
   | { kind: 'accounting' }
   | { kind: 'statutory' }
   | { kind: 'reports' }
@@ -73,17 +87,7 @@ export const MENU_SECTIONS: MenuSection[] = [
           { id: 'crm-leads', label: 'Ліди', target: { kind: 'crm' } },
           { id: 'crm-contacts', label: 'Контакти', target: { kind: 'catalogs', tab: 'counterparties' } },
           { id: 'crm-buyers', label: 'Покупці', target: { kind: 'catalogs', tab: 'counterparties' } },
-          {
-            id: 'crm-contracts',
-            label: 'Договори',
-            target: {
-              kind: 'module',
-              description: 'Реєстр договорів із покупцями та контроль умов оплати й валюти розрахунків.',
-              relatedDocType: 'customer_order',
-              relatedRouteLabel: 'Перейти до контрагентів',
-              relatedPage: 'catalogs',
-            },
-          },
+          { id: 'crm-contracts', label: 'Договори', target: { kind: 'catalogs', tab: 'contracts' } },
           { id: 'crm-events', label: 'Події', target: { kind: 'crm' } },
         ],
       },
@@ -261,9 +265,6 @@ export const MENU_SECTIONS: MenuSection[] = [
               relatedPage: 'documents',
             },
           },
-          { id: 'sales-vat-app1', label: 'Додаток № 1 до под.накладної', target: { kind: 'documents', docType: 'tax_invoice' } },
-          { id: 'sales-vat-app2', label: 'Додаток № 2 до под.накладної', target: { kind: 'documents', docType: 'tax_invoice' } },
-          { id: 'sales-vat', label: 'Податкові накладні', target: { kind: 'documents', docType: 'tax_invoice' } },
         ],
       },
       {
@@ -289,42 +290,23 @@ export const MENU_SECTIONS: MenuSection[] = [
         title: 'Розрахунки з покупцями',
         items: [
           { id: 'sales-recon', label: 'Звірки взаєморозрахунків', target: { kind: 'reports' } },
-          { id: 'sales-debt-adj', label: 'Коригування боргу', target: { kind: 'documents', docType: 'manual_journal' } },
+          { id: 'sales-contracts', label: 'Договори з покупцями', target: { kind: 'catalogs', tab: 'contracts' } },
         ],
       },
       {
         title: 'Товари і послуги',
         items: [
           { id: 'sales-items', label: 'Номенклатура', target: { kind: 'catalogs', tab: 'items' } },
-          {
-            id: 'sales-vmd',
-            label: 'Номера ВМД',
-            target: {
-              kind: 'module',
-              description: 'Облік номерів вантажних митних декларацій (ВМД) та кодів УКТЗЕД для імпортних товарів.',
-              relatedRouteLabel: 'Довідник номенклатури',
-              relatedPage: 'catalogs',
-            },
-          },
+          { id: 'sales-categories', label: 'Категорії товарів', target: { kind: 'catalogs', tab: 'categories' } },
         ],
       },
       {
         title: 'Ціни і знижки',
         items: [
           { id: 'sales-price-set', label: 'Установка цін', target: { kind: 'documents', docType: 'price_setting' } },
-          { id: 'sales-price-types', label: 'Види цін', target: { kind: 'documents', docType: 'price_setting' } },
+          { id: 'sales-price-types', label: 'Види цін', target: { kind: 'catalogs', tab: 'finance' } },
           { id: 'sales-pricelists', label: 'Прайс-листи', target: { kind: 'reports' } },
-          {
-            id: 'sales-discounts',
-            label: 'Знижки',
-            target: {
-              kind: 'module',
-              description: 'Автоматичні й ручні знижки, націнки та умови надання бонусів покупцям.',
-              relatedDocType: 'price_setting',
-              relatedRouteLabel: 'Установка цін',
-              relatedPage: 'documents',
-            },
-          },
+          { id: 'sales-discounts', label: 'Знижки у документах продажу', target: { kind: 'documents', docType: 'customer_order' } },
         ],
       },
       {
@@ -461,15 +443,14 @@ export const MENU_SECTIONS: MenuSection[] = [
               relatedPage: 'documents',
             },
           },
-          { id: 'pur-import-costs', label: 'Витрати при імпорті', target: { kind: 'assets' } },
-          { id: 'pur-in-vat', label: 'Реєстрація вх. под. документа', target: { kind: 'documents', docType: 'tax_invoice' } },
+          { id: 'pur-import-costs', label: 'Додаткові витрати на прихід', target: { kind: 'documents', docType: 'money_out' } },
         ],
       },
       {
         title: 'Розрахунки з постачальниками',
         items: [
           { id: 'pur-recon', label: 'Звірки взаєморозрахунків', target: { kind: 'reports' } },
-          { id: 'pur-debt-adj', label: 'Коригування боргу', target: { kind: 'documents', docType: 'manual_journal' } },
+          { id: 'pur-contracts', label: 'Договори з постачальниками', target: { kind: 'catalogs', tab: 'contracts' } },
         ],
       },
       {
@@ -866,9 +847,9 @@ export const MENU_SECTIONS: MenuSection[] = [
       {
         title: 'Довідники',
         items: [
-          { id: 'money-currencies', label: 'Валюти', target: { kind: 'assets' } },
-          { id: 'money-cashes', label: 'Каси', target: { kind: 'catalogs', tab: 'warehouses' } },
-          { id: 'money-cf-cats', label: 'Статті руху коштів', target: { kind: 'reports' } },
+          { id: 'money-accounts', label: 'Каси та банківські рахунки', target: { kind: 'catalogs', tab: 'accounts' } },
+          { id: 'money-cf-cats', label: 'Статті руху коштів', target: { kind: 'catalogs', tab: 'finance' } },
+          { id: 'money-templates', label: 'Друковані форми ПКО / ВКО', target: { kind: 'catalogs', tab: 'templates' } },
         ],
       },
       {
@@ -1074,52 +1055,90 @@ export const MENU_SECTIONS: MenuSection[] = [
     ],
   },
   {
-    id: 'company',
-    label: 'Компанія',
-    subtitle: 'Організації та ФОП, бухгалтерія №291, податки, ОЗ, закриття місяця та початкові залишки',
+    id: 'accounting',
+    label: 'Бухгалтерія',
+    subtitle: 'Окремий робочий простір бухгалтера: проводки Дт/Кт, ОСВ №291, ПДВ/ЄРПН, звітність ДПС, ОЗ та валюта',
     defaultTarget: { kind: 'accounting' },
     groups: [
       {
-        title: 'Компанія',
+        title: 'Проводки та Головна книга',
         items: [
-          { id: 'co-orgs', label: 'Організації', target: { kind: 'modal', modal: 'organizations' } },
-          { id: 'co-banks', label: 'Банківські рахунки', target: { kind: 'catalogs', tab: 'warehouses' } },
-          { id: 'co-warehouses', label: 'Склади і магазини', target: { kind: 'catalogs', tab: 'warehouses' } },
-          { id: 'co-departments', label: 'Підрозділи', target: { kind: 'modal', modal: 'departments' } },
-          { id: 'co-employees', label: 'Співробітники', target: { kind: 'catalogs', tab: 'employees' } },
-          { id: 'co-coa', label: 'План рахунків', target: { kind: 'catalogs', tab: 'accounts' } },
-          { id: 'co-all-catalogs', label: 'Всі довідники', target: { kind: 'catalogs', tab: 'items' } },
+          { id: 'acc-new-entry', label: 'Нова проводка Дт/Кт (вручну)', target: { kind: 'modal', modal: 'new-doc', docType: 'manual_journal' } },
+          { id: 'acc-manual-docs', label: 'Журнал ручних операцій Дт/Кт', target: { kind: 'documents', docType: 'manual_journal' } },
+          { id: 'acc-osv', label: 'Оборотно-сальдова відомість (ОСВ)', target: { kind: 'accounting' } },
+          { id: 'acc-journal', label: 'Журнал проводок (Головна книга)', target: { kind: 'accounting' } },
+          { id: 'acc-coa', label: 'План рахунків №291', target: { kind: 'accounting' } },
         ],
       },
       {
-        title: 'Фінансові операції',
+        title: 'Податковий облік і ДПС',
         items: [
-          { id: 'co-ops', label: 'Операції', target: { kind: 'documents', docType: 'manual_journal' } },
-          { id: 'co-other-exp', label: 'Інші витрати', target: { kind: 'documents', docType: 'money_out' } },
-          { id: 'co-taxes', label: 'Нарахування податків', target: { kind: 'statutory' } },
-          { id: 'co-month-close', label: 'Закриття місяця', target: { kind: 'assets' } },
+          { id: 'acc-tax-invoices', label: 'Податкові накладні (ПДВ / ЄРПН)', target: { kind: 'documents', docType: 'tax_invoice' } },
+          { id: 'acc-vat-decl', label: 'Декларація з ПДВ', target: { kind: 'statutory' } },
+          { id: 'acc-single-tax', label: 'Декларація Єдиного податку (ФОП / ТОВ)', target: { kind: 'statutory' } },
+          { id: 'acc-esv-4df', label: 'Об’єднаний звіт ЄСВ / ПДФО / 4ДФ', target: { kind: 'statutory' } },
+          { id: 'acc-saft', label: 'Експорт SAF-T UA v2.0 (XML)', target: { kind: 'accounting' } },
+        ],
+      },
+      {
+        title: 'Фінансова звітність',
+        items: [
+          { id: 'acc-balance-f1', label: 'Баланс (Форма №1)', target: { kind: 'statutory' } },
+          { id: 'acc-income-f2', label: 'Звіт про фінрезультати (Форма №2)', target: { kind: 'statutory' } },
+          { id: 'acc-payroll', label: 'Відомості зарплати (ПДФО/ВЗ/ЄСВ)', target: { kind: 'documents', docType: 'payroll_sheet' } },
+        ],
+      },
+      {
+        title: 'ОЗ, Валюта та Регламент',
+        items: [
+          { id: 'acc-fixed-assets', label: 'Основні засоби (10/13) та амортизація', target: { kind: 'assets' } },
+          { id: 'acc-fx-rates', label: 'Курси НБУ та курсові різниці', target: { kind: 'assets' } },
+          { id: 'acc-month-close', label: 'Закриття періоду та перепроведення', target: { kind: 'service' } },
+          { id: 'acc-print-forms', label: 'Друковані форми (стандарти UA)', target: { kind: 'catalogs', tab: 'templates' } },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'company',
+    label: 'Компанія',
+    subtitle: 'Організації та ФОП, підрозділи, довідники (НДІ), друковані форми та управлінська аналітика',
+    defaultTarget: { kind: 'catalogs', tab: 'items' },
+    groups: [
+      {
+        title: 'Структура компанії',
+        items: [
+          { id: 'co-orgs', label: 'Організації та ФОП', target: { kind: 'modal', modal: 'organizations' } },
+          { id: 'co-departments', label: 'Підрозділи і філії', target: { kind: 'catalogs', tab: 'departments' } },
+          { id: 'co-warehouses', label: 'Склади і магазини', target: { kind: 'catalogs', tab: 'warehouses' } },
+          { id: 'co-banks', label: 'Каси та банківські рахунки', target: { kind: 'catalogs', tab: 'accounts' } },
+          { id: 'co-employees', label: 'Співробітники (Штат)', target: { kind: 'catalogs', tab: 'employees' } },
+        ],
+      },
+      {
+        title: 'Довідники (НДІ)',
+        items: [
+          { id: 'co-items', label: 'Номенклатура (Імпорт PDF/XLS/CSV/XML)', target: { kind: 'catalogs', tab: 'items' } },
+          { id: 'co-categories', label: 'Категорії товарів', target: { kind: 'catalogs', tab: 'categories' } },
+          { id: 'co-counterparties', label: 'Контрагенти', target: { kind: 'catalogs', tab: 'counterparties' } },
+          { id: 'co-contracts', label: 'Договори', target: { kind: 'catalogs', tab: 'contracts' } },
+          { id: 'co-finance-cats', label: 'Статті РГК і Види цін', target: { kind: 'catalogs', tab: 'finance' } },
+          { id: 'co-bom', label: 'Специфікації BOM', target: { kind: 'catalogs', tab: 'bom' } },
+          { id: 'co-print-templates', label: 'Друковані форми (10 стандартів UA)', target: { kind: 'catalogs', tab: 'templates' } },
         ],
       },
       {
         title: 'Розвиток бізнесу',
         items: [
-          { id: 'co-biz-analysis', label: 'Аналіз бізнесу', target: { kind: 'reports' } },
-          { id: 'co-biz-kpi', label: 'Показники бізнесу', target: { kind: 'dashboard' } },
+          { id: 'co-biz-analysis', label: 'Управлінські звіти (P&L / CashFlow)', target: { kind: 'reports' } },
+          { id: 'co-biz-kpi', label: 'Показники бізнесу (Дашборд)', target: { kind: 'dashboard' } },
         ],
       },
       {
-        title: 'Аналітика',
-        items: [
-          { id: 'co-state', label: 'Стан компанії', target: { kind: 'accounting' } },
-          { id: 'co-reports', label: 'Звіти', target: { kind: 'statutory' } },
-        ],
-      },
-      {
-        title: 'Початкові залишки',
+        title: 'Початкові залишки та Імпорт',
         items: [
           { id: 'co-ob', label: 'Введення початкових залишків', target: { kind: 'documents', docType: 'opening_balance' } },
-          { id: 'co-excel-import', label: 'Завантаження даних з Excel', target: { kind: 'service' } },
-          { id: 'co-site-import', label: 'Завантаження даних з сайту', target: { kind: 'service' } },
+          { id: 'co-excel-import', label: 'Завантаження з PDF / Excel / CSV / XML', target: { kind: 'service' } },
         ],
       },
     ],
@@ -1200,7 +1219,7 @@ export const MENU_SECTIONS: MenuSection[] = [
           },
           { id: 'set-general', label: 'Загальні налаштування', target: { kind: 'modal', modal: 'organizations' } },
           { id: 'set-data-fix', label: 'Коригування даних', target: { kind: 'service' } },
-          { id: 'set-print-forms', label: 'Друковані форми, звіти і обробки', target: { kind: 'documents' } },
+          { id: 'set-print-forms', label: 'Друковані форми (10 стандартів UA)', target: { kind: 'catalogs', tab: 'templates' } },
           {
             id: 'set-cloud',
             label: 'Робота в хмарі',
@@ -1279,12 +1298,10 @@ export const MENU_SECTIONS: MenuSection[] = [
         ],
       },
       {
-        title: 'Обмін даними та ДПС',
+        title: 'Обмін даними',
         items: [
           { id: 'int-bas-odata', label: 'Прямий обмін BAS / 1С (OData)', target: { kind: 'service' } },
-          { id: 'int-csv', label: 'Імпорт із Excel / CSV', target: { kind: 'service' } },
-          { id: 'int-saft', label: 'SAF-T UA v2.0 та ЄРПН XML', target: { kind: 'accounting' } },
-          { id: 'int-dps', label: 'Електронна звітність ДПС (Ф1/Ф2/ПДВ/ЄП)', target: { kind: 'statutory' } },
+          { id: 'int-csv', label: 'Імпорт номенклатури (PDF / XLS / CSV / XML)', target: { kind: 'service' } },
         ],
       },
     ],

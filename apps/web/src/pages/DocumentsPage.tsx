@@ -554,6 +554,11 @@ export function DocumentsPage({
                     </td>
                     <td className="px-4 py-3 text-right font-mono font-semibold tabular-nums text-slate-900">
                       <div>{fmtMoney(doc.totalAmount)}</div>
+                      {Number(doc.discountTotal ?? 0) > 0 && (
+                        <div className="text-[10px] font-semibold" style={{ color: 'var(--neg-ink)' }}>
+                          Знижка: −{fmtMoney(doc.discountTotal)}
+                        </div>
+                      )}
                       {doc.docType === 'tax_invoice' && Number(doc.vatAmount ?? 0) > 0 && (
                         <div className="text-[10px] text-sky-700">
                           ПДВ: {fmtMoney(doc.vatAmount)}

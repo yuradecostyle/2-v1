@@ -355,6 +355,7 @@ export const documents = pgTable(
     vatRate: integer('vat_rate').notNull().default(20),
     currency: text('currency').notNull().default('UAH'),
     exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).notNull().default('1.000000'),
+    discountTotal: numeric('discount_total', { precision: 18, scale: 2 }).notNull().default('0.00'),
     totalAmount: numeric('total_amount', { precision: 18, scale: 2 }).notNull().default('0.00'),
     vatAmount: numeric('vat_amount', { precision: 18, scale: 2 }).notNull().default('0.00'),
     fiscalReceiptId: text('fiscal_receipt_id').notNull().default(''),
@@ -389,6 +390,8 @@ export const documentLines = pgTable(
     qty: numeric('qty', { precision: 18, scale: 4 }).notNull().default('0.0000'),
     diffQty: numeric('diff_qty', { precision: 18, scale: 4 }).notNull().default('0.0000'),
     price: numeric('price', { precision: 18, scale: 2 }).notNull().default('0.00'),
+    discountPercent: numeric('discount_percent', { precision: 6, scale: 2 }).notNull().default('0.00'),
+    discountAmount: numeric('discount_amount', { precision: 18, scale: 2 }).notNull().default('0.00'),
     amount: numeric('amount', { precision: 18, scale: 2 }).notNull().default('0.00'),
     costAmount: numeric('cost_amount', { precision: 18, scale: 2 }).notNull().default('0.00'),
     taxAmount: numeric('tax_amount', { precision: 18, scale: 2 }).notNull().default('0.00'),
@@ -747,4 +750,33 @@ export const regCurrencyRates = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [index('idx_fx_rates_code_date').on(table.currencyCode, table.rateDate)]
+);
+
+// 6. ШАБЛОНИ ДРУКОВАНИХ ФОРМ (УКРАЇНСЬКІ БУХГАЛТЕРСЬКІ ВЗІРЦІ З МОЖЛИВІСТЮ РЕДАГУВАННЯ)
+export const printTemplates = pgTable(
+  'print_templates',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    templateKey: text('template_key').notNull(),
+    docType: text('doc_type').notNull(),
+    name: text('name').notNull(),
+    standardCode: text('standard_code').notNull().default(''),
+    titleText: text('title_text').notNull(),
+    subtitleText: text('subtitle_text').notNull().default(''),
+    headerNote: text('header_note').notNull().default(''),
+    footerNote: text('footer_note').notNull().default(''),
+    signLeftLabel: text('sign_left_label').notNull().default('Відпустив(ла)'),
+    signRightLabel: text('sign_right_label').notNull().default('Отримав(ла)'),
+    showDiscountColumn: boolean('show_discount_column').notNull().default(true),
+    showVatBlock: boolean('show_vat_block').notNull().default(true),
+    showIbanBlock: boolean('show_iban_block').notNull().default(true),
+    showStampArea: boolean('show_stamp_area').notNull().default(true),
+    showSkuColumn: boolean('show_sku_column').notNull().default(true),
+    isSystem: boolean('is_system').notNull().default(true),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('idx_print_templates_org_key').on(table.organizationId, table.templateKey)]
 );

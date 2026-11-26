@@ -63,6 +63,11 @@ import {
   generateSaftUaXml,
   generateTaxInvoiceXmlJ1201015,
   getPrintableDocumentData,
+  getPrintTemplates,
+  savePrintTemplate,
+  resetPrintTemplate,
+  parseUniversalItemsFile,
+  commitUniversalItemsImport,
   assertRolePermission,
   assertEffectivePermission,
   canViewDocType,
@@ -338,7 +343,7 @@ await ensureDefaultDepartments(db, { seedDemoDepartments: SEED_DEMO_DATA });
 
 type AuthedRequest = FastifyRequest & { authUser?: AuthUserDto; authToken?: string };
 
-const app = Fastify({ logger: false });
+const app = Fastify({ logger: false, bodyLimit: 30 * 1024 * 1024 });
 await app.register(cors, { origin: true });
 
 // Глобальна перевірка авторизації по токену сесії (крім відкритих маршрутів)
@@ -1977,6 +1982,167 @@ app.post('/api/catalogs/bom-specs', async (req) => {
   return spec;
 });
 
+app.patch('/api/catalogs/items/:id', async (req, reply) => {
+  const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+  const body = z
+    .object({
+      sku: z.string().min(1).optional(),
+      barcode: z.string().optional(),
+      name: z.string().min(1).optional(),
+      categoryId: z.string().uuid().nullable().optional(),
+      unit: z.string().optional(),
+      itemType: z.enum(['GOODS', 'SERVICE']).optional(),
+      isActive: z.boolean().optional(),
+    })
+    .parse(req.body);
+  const [updated] = await db
+    .update(items)
+    .set({
+      ...(body.sku !== undefined ? { sku: body.sku.trim() } : {}),
+      ...(body.barcode !== undefined ? { barcode: body.barcode.trim() } : {}),
+      ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+      ...(body.categoryId !== undefined ? { categoryId: body.categoryId } : {}),
+      ...(body.unit !== undefined ? { unit: body.unit.trim() || 'шт' } : {}),
+      ...(body.itemType !== undefined ? { itemType: body.itemType } : {}),
+      ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+    })
+    .where(eq(items.id, id))
+    .returning();
+  if (!updated) return reply.status(404).send({ error: 'NOT_FOUND', message: 'Номенклатуру не знайдено' });
+  return updated;
+});
+
+app.patch('/api/catalogs/counterparties/:id', async (req, reply) => {
+  const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+  const body = z
+    .object({
+      name: z.string().min(1).optional(),
+      edrpou: z.string().optional(),
+      ipn: z.string().optional(),
+      iban: z.string().optional(),
+      phone: z.string().optional(),
+      email: z.string().optional(),
+      isCustomer: z.boolean().optional(),
+      isSupplier: z.boolean().optional(),
+    })
+    .parse(req.body);
+  const [updated] = await db
+    .update(counterparties)
+    .set({
+      ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+      ...(body.edrpou !== undefined ? { edrpou: body.edrpou.trim() } : {}),
+      ...(body.ipn !== undefined ? { ipn: body.ipn.trim() } : {}),
+      ...(body.iban !== undefined ? { iban: body.iban.trim() } : {}),
+      ...(body.phone !== undefined ? { phone: body.phone.trim() } : {}),
+      ...(body.email !== undefined ? { email: body.email.trim() } : {}),
+      ...(body.isCustomer !== undefined ? { isCustomer: body.isCustomer } : {}),
+      ...(body.isSupplier !== undefined ? { isSupplier: body.isSupplier } : {}),
+    })
+    .where(eq(counterparties.id, id))
+    .returning();
+  if (!updated) return reply.status(404).send({ error: 'NOT_FOUND', message: 'Контрагента не знайдено' });
+  return updated;
+});
+
+app.post('/api/catalogs/contracts', async (req) => {
+  const orgId = await getOrgId(req);
+  const body = z
+    .object({
+      counterpartyId: z.string().uuid(),
+      name: z.string().min(1),
+      currency: z.string().default('UAH'),
+      contractType: z.enum(['CUSTOMER', 'SUPPLIER']).default('CUSTOMER'),
+    })
+    .parse(req.body);
+  const [created] = await db
+    .insert(contracts)
+    .values({ ...body, organizationId: orgId })
+    .returning();
+  return created;
+});
+
+app.post('/api/catalogs/cashflow-categories', async (req) => {
+  const body = z
+    .object({
+      name: z.string().min(1),
+      direction: z.enum(['IN', 'OUT']).default('OUT'),
+      isOperatingExpense: z.boolean().default(false),
+    })
+    .parse(req.body);
+  const [created] = await db
+    .insert(cashflowCategories)
+    .values({
+      name: body.name.trim(),
+      direction: body.direction,
+      isOperatingExpense: body.isOperatingExpense,
+    })
+    .returning();
+  return created;
+});
+
+app.post('/api/catalogs/price-types', async (req) => {
+  const body = z
+    .object({
+      code: z.string().min(1),
+      name: z.string().min(1),
+      currency: z.string().default('UAH'),
+    })
+    .parse(req.body);
+  const [created] = await db
+    .insert(priceTypes)
+    .values({
+      code: body.code.trim().toUpperCase(),
+      name: body.name.trim(),
+      currency: body.currency.trim().toUpperCase(),
+    })
+    .returning();
+  return created;
+});
+
+// ============================================================================
+// ШАБЛОНИ ДРУКОВАНИХ ФОРМ (УКРАЇНСЬКІ БУХГАЛТЕРСЬКІ ВЗІРЦІ — РЕДАГУВАННЯ)
+// ============================================================================
+
+app.get('/api/print-templates', async (req) => {
+  const orgId = await getOrgId(req);
+  return getPrintTemplates(db, orgId);
+});
+
+app.put('/api/print-templates/:templateKey', async (req) => {
+  const orgId = await getOrgId(req);
+  const { templateKey } = z.object({ templateKey: z.string().min(1) }).parse(req.params);
+  const body = z
+    .object({
+      docType: z.string().optional(),
+      name: z.string().min(1).optional(),
+      standardCode: z.string().optional(),
+      titleText: z.string().min(1).optional(),
+      subtitleText: z.string().optional(),
+      headerNote: z.string().optional(),
+      footerNote: z.string().optional(),
+      signLeftLabel: z.string().optional(),
+      signRightLabel: z.string().optional(),
+      showDiscountColumn: z.boolean().optional(),
+      showVatBlock: z.boolean().optional(),
+      showIbanBlock: z.boolean().optional(),
+      showStampArea: z.boolean().optional(),
+      showSkuColumn: z.boolean().optional(),
+    })
+    .parse(req.body);
+
+  return savePrintTemplate(db, {
+    organizationId: orgId,
+    templateKey,
+    ...body,
+  });
+});
+
+app.post('/api/print-templates/:templateKey/reset', async (req) => {
+  const orgId = await getOrgId(req);
+  const { templateKey } = z.object({ templateKey: z.string().min(1) }).parse(req.params);
+  return resetPrintTemplate(db, orgId, templateKey);
+});
+
 // ============================================================================
 // ДОКУМЕНТИ (DOCUMENTS) + ДРУКОВАНІ ФОРМИ + ПДВ J1201015 + RBAC
 // ============================================================================
@@ -1988,6 +2154,8 @@ const docLineSchema = z.object({
   bookQty: z.union([z.number(), z.string()]).optional().default(0),
   qty: z.union([z.number(), z.string()]).optional().default(0),
   price: z.union([z.number(), z.string()]).optional().default(0),
+  discountPercent: z.union([z.number(), z.string()]).optional().default(0),
+  discountAmount: z.union([z.number(), z.string()]).optional().default(0),
   amount: z.union([z.number(), z.string()]).optional().default(0),
   debitAccountCode: z.string().optional().default(''),
   creditAccountCode: z.string().optional().default(''),
@@ -2311,7 +2479,23 @@ app.post('/api/documents', async (req) => {
     const qty = d(l.qty);
     const bookQty = d(l.bookQty);
     const price = d(l.price);
-    const amount = d(l.amount).gt(0) ? d(l.amount) : qty.mul(price);
+    const grossLine = qty.mul(price);
+    const discPctNum = Math.min(100, Math.max(0, Number(l.discountPercent ?? 0) || 0));
+    const discPct = d(discPctNum);
+    const discAmt = discPct.gt(0)
+      ? grossLine.mul(discPct).div(100)
+      : d(l.discountAmount ?? 0).gt(0)
+        ? d(l.discountAmount ?? 0)
+        : d(0);
+    const computedLineAmt = grossLine.minus(discAmt);
+    const amount =
+      discAmt.gt(0)
+        ? computedLineAmt.lt(0)
+          ? d(0)
+          : computedLineAmt
+        : d(l.amount).gt(0)
+          ? d(l.amount)
+          : grossLine;
     return {
       lineNo: idx + 1,
       lineRole: l.lineRole ?? 'ITEM',
@@ -2321,6 +2505,8 @@ app.post('/api/documents', async (req) => {
       qty: toNumeric4(qty),
       diffQty: toNumeric4(qty.minus(bookQty)),
       price: toNumeric2(price),
+      discountPercent: toNumeric2(discPct),
+      discountAmount: toNumeric2(discAmt),
       amount: toNumeric2(amount),
       debitAccountCode: l.debitAccountCode ?? '',
       creditAccountCode: l.creditAccountCode ?? '',
@@ -2332,6 +2518,9 @@ app.post('/api/documents', async (req) => {
     };
   });
 
+  const computedDiscountTotal = toNumeric2(
+    normalizedLines.reduce((acc, l) => acc.plus(d(l.discountAmount)), d(0))
+  );
   const computedTotal =
     body.totalAmount !== undefined
       ? toNumeric2(body.totalAmount)
@@ -2356,6 +2545,7 @@ app.post('/api/documents', async (req) => {
       cashflowCategoryId: body.cashflowCategoryId ?? null,
       priceTypeId: body.priceTypeId ?? null,
       vatRate: body.vatRate ?? 20,
+      discountTotal: computedDiscountTotal,
       totalAmount: computedTotal,
       comment: body.comment,
     })
@@ -2430,6 +2620,7 @@ app.post('/api/documents/:id/create-invoice-from-order', async (req, reply) => {
       counterpartyId: order.counterpartyId,
       contractId: order.contractId,
       priceTypeId: order.priceTypeId,
+      discountTotal: order.discountTotal,
       totalAmount: order.totalAmount,
       comment: `Відвантаження на підставі замовлення №${order.docNumber}`,
     })
@@ -2443,6 +2634,8 @@ app.post('/api/documents/:id/create-invoice-from-order', async (req, reply) => {
         itemId: l.itemId,
         qty: l.qty,
         price: l.price,
+        discountPercent: l.discountPercent,
+        discountAmount: l.discountAmount,
         amount: l.amount,
       }))
     );
@@ -2496,6 +2689,7 @@ app.post('/api/documents/:id/create-tax-invoice', async (req, reply) => {
       counterpartyId: sourceDoc.counterpartyId,
       contractId: sourceDoc.contractId,
       vatRate: sourceDoc.vatRate ?? 20,
+      discountTotal: sourceDoc.discountTotal,
       totalAmount: sourceDoc.totalAmount,
       comment: `Податкова накладна до документа №${sourceDoc.docNumber}`,
     })
@@ -2509,6 +2703,8 @@ app.post('/api/documents/:id/create-tax-invoice', async (req, reply) => {
         itemId: l.itemId,
         qty: l.qty,
         price: l.price,
+        discountPercent: l.discountPercent,
+        discountAmount: l.discountAmount,
         amount: l.amount,
       }))
     );
@@ -2559,7 +2755,23 @@ app.put('/api/documents/:id', async (req, reply) => {
     const qty = d(l.qty);
     const bookQty = d(l.bookQty);
     const price = d(l.price);
-    const amount = d(l.amount).gt(0) ? d(l.amount) : qty.mul(price);
+    const grossLine = qty.mul(price);
+    const discPctNum = Math.min(100, Math.max(0, Number(l.discountPercent ?? 0) || 0));
+    const discPct = d(discPctNum);
+    const discAmt = discPct.gt(0)
+      ? grossLine.mul(discPct).div(100)
+      : d(l.discountAmount ?? 0).gt(0)
+        ? d(l.discountAmount ?? 0)
+        : d(0);
+    const computedLineAmt = grossLine.minus(discAmt);
+    const amount =
+      discAmt.gt(0)
+        ? computedLineAmt.lt(0)
+          ? d(0)
+          : computedLineAmt
+        : d(l.amount).gt(0)
+          ? d(l.amount)
+          : grossLine;
     return {
       documentId: id,
       lineNo: idx + 1,
@@ -2570,6 +2782,8 @@ app.put('/api/documents/:id', async (req, reply) => {
       qty: toNumeric4(qty),
       diffQty: toNumeric4(qty.minus(bookQty)),
       price: toNumeric2(price),
+      discountPercent: toNumeric2(discPct),
+      discountAmount: toNumeric2(discAmt),
       amount: toNumeric2(amount),
       debitAccountCode: l.debitAccountCode ?? '',
       creditAccountCode: l.creditAccountCode ?? '',
@@ -2581,6 +2795,9 @@ app.put('/api/documents/:id', async (req, reply) => {
     };
   });
 
+  const computedDiscountTotal = toNumeric2(
+    normalizedLines.reduce((acc, l) => acc.plus(d(l.discountAmount)), d(0))
+  );
   const computedTotal =
     body.totalAmount !== undefined
       ? toNumeric2(body.totalAmount)
@@ -2602,6 +2819,7 @@ app.put('/api/documents/:id', async (req, reply) => {
       cashflowCategoryId: body.cashflowCategoryId ?? null,
       priceTypeId: body.priceTypeId ?? null,
       vatRate: body.vatRate ?? existing.vatRate,
+      discountTotal: computedDiscountTotal,
       totalAmount: computedTotal,
       comment: body.comment,
       updatedAt: new Date(),
@@ -2955,6 +3173,7 @@ app.post('/api/documents/:id/create-related', async (req, reply) => {
           ? (ptList[0]?.id ?? null)
           : src.priceTypeId,
       vatRate: src.vatRate ?? 20,
+      discountTotal: isCash ? '0.00' : src.discountTotal,
       totalAmount: src.totalAmount,
       comment: `Створено на підставі №${src.docNumber}`,
     })
@@ -2974,6 +3193,8 @@ app.post('/api/documents/:id/create-related', async (req, reply) => {
         itemId: l.itemId,
         qty: l.qty,
         price: l.price,
+        discountPercent: l.discountPercent,
+        discountAmount: l.discountAmount,
         amount: l.amount,
       }))
     );
@@ -3199,6 +3420,7 @@ app.get('/api/prices/latest', async (req) => {
 // ============================================================================
 
 app.get('/api/accounting/trial-balance', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const query = z
     .object({
@@ -3215,6 +3437,7 @@ app.get('/api/accounting/trial-balance', async (req) => {
 });
 
 app.get('/api/accounting/subkonto', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const query = z
     .object({
@@ -3233,6 +3456,7 @@ app.get('/api/accounting/subkonto', async (req) => {
 });
 
 app.get('/api/accounting/journal', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const query = z
     .object({
@@ -3251,6 +3475,7 @@ app.get('/api/accounting/journal', async (req) => {
 });
 
 app.get('/api/accounting/saft-ua', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const query = z
     .object({
@@ -3496,6 +3721,63 @@ app.post('/api/import/items', async (req) => {
   return importItemsFromBasCsv(db, body.csvText);
 });
 
+app.post('/api/import/items/parse-file', async (req) => {
+  const body = z
+    .object({
+      filename: z.string().min(1),
+      contentBase64: z.string().min(1),
+      mimeType: z.string().optional(),
+    })
+    .parse(req.body);
+  return parseUniversalItemsFile(body);
+});
+
+app.post('/api/import/items/commit', async (req) => {
+  const { role, userName } = getRequestRole(req);
+  const orgId = await getOrgId(req);
+  const deptScope = await resolveDepartmentScope(req, orgId);
+  const body = z
+    .object({
+      items: z
+        .array(
+          z.object({
+            sku: z.string().optional().default(''),
+            name: z.string().min(1),
+            categoryName: z.string().optional().default(''),
+            unit: z.string().optional().default('шт'),
+            price: z.number().optional().default(0),
+            barcode: z.string().optional().default(''),
+            itemType: z.enum(['GOODS', 'SERVICE']).optional().default('GOODS'),
+          })
+        )
+        .min(1),
+      defaultCategoryName: z.string().optional().default(''),
+      createPriceSetting: z.boolean().optional().default(false),
+      priceTypeId: z.string().uuid().nullable().optional(),
+    })
+    .parse(req.body);
+
+  const result = await commitUniversalItemsImport(db, {
+    organizationId: orgId,
+    departmentId: deptScope.activeDepartmentId ?? deptScope.visibleDepartments[0]?.id ?? null,
+    items: body.items,
+    defaultCategoryName: body.defaultCategoryName,
+    createPriceSetting: body.createPriceSetting,
+    priceTypeId: body.priceTypeId ?? null,
+  });
+
+  await recordAuditLog(db, {
+    organizationId: orgId,
+    userName,
+    userRole: role,
+    action: 'UNIVERSAL_IMPORT_ITEMS',
+    entityType: 'items',
+    summary: `Імпорт номенклатури з файлу: створено ${result.created}, оновлено ${result.updated}, категорій +${result.categoriesCreated}`,
+  });
+
+  return result;
+});
+
 app.post('/api/import/counterparties', async (req) => {
   const body = z.object({ csvText: z.string().min(1) }).parse(req.body);
   return importCounterpartiesFromBasCsv(db, body.csvText);
@@ -3609,11 +3891,13 @@ app.patch('/api/crm/activities/:id/toggle', async (req) => {
 // ============================================================================
 
 app.get('/api/fixed-assets', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   return getFixedAssetsList(db, orgId);
 });
 
 app.post('/api/fixed-assets', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const body = z
     .object({
@@ -3632,6 +3916,7 @@ app.post('/api/fixed-assets', async (req) => {
 });
 
 app.post('/api/fixed-assets/depreciate', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const body = z
     .object({ periodDate: z.string().optional().default(new Date().toISOString()) })
@@ -3662,6 +3947,7 @@ app.get('/api/currency/balances', async (req) => {
 });
 
 app.post('/api/currency/revalue', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const { asOfDate } = z
     .object({ asOfDate: z.string().optional().default(new Date().toISOString()) })
@@ -3674,6 +3960,7 @@ app.post('/api/currency/revalue', async (req) => {
 // ============================================================================
 
 app.get('/api/statutory/balance-f1', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const { asOfDate } = z
     .object({ asOfDate: z.string().optional().default('2026-11-30T23:59:59Z') })
@@ -3682,6 +3969,7 @@ app.get('/api/statutory/balance-f1', async (req) => {
 });
 
 app.get('/api/statutory/income-f2', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const q = z
     .object({
@@ -3693,6 +3981,7 @@ app.get('/api/statutory/income-f2', async (req) => {
 });
 
 app.get('/api/statutory/vat-declaration', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const q = z
     .object({
@@ -3704,6 +3993,7 @@ app.get('/api/statutory/vat-declaration', async (req) => {
 });
 
 app.get('/api/statutory/single-tax', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const q = z
     .object({
@@ -3716,6 +4006,7 @@ app.get('/api/statutory/single-tax', async (req) => {
 });
 
 app.get('/api/statutory/unified-esv', async (req) => {
+  assertReqPerm(req, 'ACCOUNTING');
   const orgId = await getOrgId(req);
   const q = z
     .object({

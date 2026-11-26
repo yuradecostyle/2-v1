@@ -8,6 +8,10 @@ import {
   ListTree,
   Plus,
   Scale,
+  FileSpreadsheet,
+  Landmark,
+  Receipt,
+  FileText,
 } from 'lucide-react';
 import {
   apiFetch,
@@ -24,7 +28,17 @@ import { DocumentEditorModal } from '../components/DocumentEditorModal';
 
 type AccTab = 'trial-balance' | 'journal' | 'coa' | 'saft';
 
-export function AccountingPage({ bootstrap }: { bootstrap: BootstrapData }) {
+export function AccountingPage({
+  bootstrap,
+  onOpenStatutory,
+  onOpenAssets,
+  onOpenDocType,
+}: {
+  bootstrap: BootstrapData;
+  onOpenStatutory?: () => void;
+  onOpenAssets?: () => void;
+  onOpenDocType?: (docType: DocumentType) => void;
+}) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<AccTab>('trial-balance');
   const [dateFrom, setDateFrom] = useState('2026-10-01');
@@ -169,15 +183,21 @@ export function AccountingPage({ bootstrap }: { bootstrap: BootstrapData }) {
             Подвійний запис Дт/Кт, багатовимірні субконто, Оборотно-сальдова відомість та е-аудит ДПС
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
+            type="button"
             onClick={() => setManualOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-fuchsia-600 px-3.5 py-2 text-xs font-medium text-white shadow-xs hover:bg-fuchsia-700"
+            className="inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold shadow-xs transition"
+            style={{
+              background: 'linear-gradient(135deg, var(--primary), var(--primary-2))',
+              color: 'var(--surface)',
+            }}
           >
-            <Plus className="h-3.5 w-3.5" /> Операція Дт/Кт (вручну)
+            <Plus className="h-3.5 w-3.5" /> Нова проводка Дт/Кт
           </button>
           {tab === 'trial-balance' && (
             <button
+              type="button"
               onClick={exportTrialBalanceCsv}
               className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
             >
@@ -186,6 +206,123 @@ export function AccountingPage({ bootstrap }: { bootstrap: BootstrapData }) {
           )}
         </div>
       </div>
+
+      {/* Панель швидкого доступу бухгалтера (окремі бухгалтерські модулі та операції) */}
+      {(onOpenStatutory || onOpenAssets || onOpenDocType) && (
+        <div
+          className="grid grid-cols-1 gap-2.5 rounded-2xl p-3 sm:grid-cols-2 lg:grid-cols-4"
+          style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-soft)',
+          }}
+        >
+          {onOpenDocType && (
+            <button
+              type="button"
+              onClick={() => onOpenDocType('manual_journal')}
+              className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-left transition"
+              style={{
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <span
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                style={{ background: 'var(--primary-soft)', color: 'var(--primary-ink)' }}
+              >
+                <FileText className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-extrabold" style={{ color: 'var(--text)' }}>
+                  Журнал ручних Дт/Кт
+                </span>
+                <span className="block truncate text-[11px]" style={{ color: 'var(--muted)' }}>
+                  Усі бухгалтерські довідки
+                </span>
+              </span>
+            </button>
+          )}
+          {onOpenDocType && (
+            <button
+              type="button"
+              onClick={() => onOpenDocType('tax_invoice')}
+              className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-left transition"
+              style={{
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <span
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                style={{ background: 'var(--info-soft)', color: 'var(--info-ink)' }}
+              >
+                <Receipt className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-extrabold" style={{ color: 'var(--text)' }}>
+                  Податкові накладні
+                </span>
+                <span className="block truncate text-[11px]" style={{ color: 'var(--muted)' }}>
+                  ПДВ · XML J1201015 ЄРПН
+                </span>
+              </span>
+            </button>
+          )}
+          {onOpenStatutory && (
+            <button
+              type="button"
+              onClick={onOpenStatutory}
+              className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-left transition"
+              style={{
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <span
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                style={{ background: 'var(--pos-soft)', color: 'var(--pos-ink)' }}
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-extrabold" style={{ color: 'var(--text)' }}>
+                  Звітність ДПС
+                </span>
+                <span className="block truncate text-[11px]" style={{ color: 'var(--muted)' }}>
+                  Ф1, Ф2, ПДВ, ЄП, ЄСВ/4ДФ
+                </span>
+              </span>
+            </button>
+          )}
+          {onOpenAssets && (
+            <button
+              type="button"
+              onClick={onOpenAssets}
+              className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-left transition"
+              style={{
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <span
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                style={{ background: 'var(--warn-soft)', color: 'var(--warn-ink)' }}
+              >
+                <Landmark className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-extrabold" style={{ color: 'var(--text)' }}>
+                  ОЗ (10/13) та Валюта
+                </span>
+                <span className="block truncate text-[11px]" style={{ color: 'var(--muted)' }}>
+                  Амортизація та курси НБУ
+                </span>
+              </span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-2">

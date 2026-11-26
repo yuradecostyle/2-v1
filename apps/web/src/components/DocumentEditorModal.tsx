@@ -18,6 +18,7 @@ import {
   Sparkles,
   Building2,
   Share2,
+  Percent,
 } from 'lucide-react';
 import {
   apiFetch,
@@ -161,6 +162,7 @@ export function DocumentEditorModal({
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [linkSelectId, setLinkSelectId] = useState<string>('');
   const [shareOpen, setShareOpen] = useState(false);
+  const [globalDiscountPct, setGlobalDiscountPct] = useState<string>('');
 
   const isCashDoc = docType === 'money_in' || docType === 'money_out';
   const isPriceDoc = docType === 'price_setting';
@@ -171,8 +173,18 @@ export function DocumentEditorModal({
   const isTaxInvoiceDoc = docType === 'tax_invoice';
   const isManualJournal = docType === 'manual_journal';
   const isOrderDoc = docType === 'customer_order';
+  const hasDiscountSupport =
+    docType === 'customer_order' || docType === 'sales_invoice' || isTaxInvoiceDoc;
   const isTradeDoc =
     docType === 'goods_receipt' || docType === 'sales_invoice' || isOrderDoc || isTaxInvoiceDoc;
+
+  const calcLineAmounts = (qtyVal: number, priceVal: number, discPctVal: number) => {
+    const gross = qtyVal * priceVal;
+    const pct = Math.min(100, Math.max(0, Number.isFinite(discPctVal) ? discPctVal : 0));
+    const discAmt = Number(((gross * pct) / 100).toFixed(2));
+    const netAmt = Number(Math.max(0, gross - discAmt).toFixed(2));
+    return { discountPercent: pct, discountAmount: discAmt, amount: netAmt };
+  };
 
   const relationsQuery = useQuery({
     queryKey: ['doc-relations', currentDocId],
@@ -305,7 +317,8 @@ export function DocumentEditorModal({
           prev.map((l) => {
             if (l.itemId && Number(l.price) === 0 && prices[l.itemId]) {
               const p = Number(prices[l.itemId]);
-              return { ...l, price: p, amount: Number((Number(l.qty || 1) * p).toFixed(2)) };
+              const res = calcLineAmounts(Number(l.qty || 1), p, Number(l.discountPercent || 0));
+              return { ...l, price: p, ...res };
             }
             return l;
           })
@@ -317,6 +330,10 @@ export function DocumentEditorModal({
   // Супер-швидке додавання товару з верхньої панелі пошуку: якщо товар вже є — збільшує к-сть на +1!
   const quickAddItemToOrder = (itemId: string) => {
     const autoPrice = latestPrices[itemId] ? Number(latestPrices[itemId]) : 0;
+    const defaultPct =
+      hasDiscountSupport && globalDiscountPct.trim() !== ''
+        ? Math.min(100, Math.max(0, Number(globalDiscountPct) || 0))
+        : 0;
     setLines((prev) => {
       const existingIdx = prev.findIndex(
         (l) => l.itemId === itemId && (!isProductionDoc || l.lineRole === 'COMPONENT')
@@ -326,9 +343,12 @@ export function DocumentEditorModal({
           if (i !== existingIdx) return l;
           const nextQty = Number(l.qty || 0) + 1;
           const p = Number(l.price || autoPrice);
-          return { ...l, qty: nextQty, price: p, amount: Number((nextQty * p).toFixed(2)) };
+          const pct = Number(l.discountPercent || 0);
+          const res = calcLineAmounts(nextQty, p, pct);
+          return { ...l, qty: nextQty, price: p, ...res };
         });
       }
+      const res = calcLineAmounts(1, autoPrice, defaultPct);
       return [
         ...prev,
         {
@@ -337,10 +357,20 @@ export function DocumentEditorModal({
           bookQty: 0,
           qty: 1,
           price: autoPrice,
-          amount: autoPrice,
+          ...res,
         },
       ];
     });
+  };
+
+  const applyGlobalDiscountToAll = () => {
+    const pct = Math.min(100, Math.max(0, Number(globalDiscountPct) || 0));
+    setLines((prev) =>
+      prev.map((l) => {
+        const res = calcLineAmounts(Number(l.qty || 0), Number(l.price || 0), pct);
+        return { ...l, ...res };
+      })
+    );
   };
 
   const handleSelectOrderBasis = (orderId: string) => {
@@ -357,6 +387,8 @@ export function DocumentEditorModal({
             itemId: l.itemId,
             qty: l.qty,
             price: l.price,
+            discountPercent: l.discountPercent ?? 0,
+            discountAmount: l.discountAmount ?? 0,
             amount: l.amount,
           }))
         );
@@ -390,6 +422,8 @@ export function DocumentEditorModal({
   };
 
   const computedLinesTotal = lines.reduce((sum, l) => sum + Number(l.amount || 0), 0);
+  const computedDiscountTotal = lines.reduce((sum, l) => sum + Number(l.discountAmount || 0), 0);
+  const computedGrossSubtotal = computedLinesTotal + computedDiscountTotal;
 
   const updateLine = (idx: number, patch: Partial<DocumentLineDto>) => {
     setLines((prev) =>
@@ -413,11 +447,18 @@ export function DocumentEditorModal({
         if (
           !isManualJournal &&
           !isPayrollDoc &&
-          (patch.qty !== undefined || patch.price !== undefined || patch.itemId !== undefined)
+          (patch.qty !== undefined ||
+            patch.price !== undefined ||
+            patch.itemId !== undefined ||
+            patch.discountPercent !== undefined)
         ) {
           const q = Number(next.qty || 0);
           const p = Number(next.price || 0);
-          next.amount = Number((q * p).toFixed(2));
+          const discPct = hasDiscountSupport ? Number(next.discountPercent || 0) : 0;
+          const res = calcLineAmounts(q, p, discPct);
+          next.discountPercent = patch.discountPercent !== undefined ? patch.discountPercent : res.discountPercent;
+          next.discountAmount = res.discountAmount;
+          next.amount = res.amount;
         }
         return next;
       })
@@ -1214,7 +1255,47 @@ export function DocumentEditorModal({
                         Швидко додати товар (введіть назву / артикул — якщо немає, створіть одразу з
                         категорією)
                       </span>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {hasDiscountSupport && (
+                          <div
+                            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1"
+                            style={{
+                              background: 'var(--surface)',
+                              border: '1px solid var(--border-strong)',
+                            }}
+                          >
+                            <Percent className="h-3 w-3" style={{ color: 'var(--primary)' }} />
+                            <span className="text-[11px] font-semibold" style={{ color: 'var(--text-2)' }}>
+                              Знижка:
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="0.5"
+                              value={globalDiscountPct}
+                              onChange={(e) => setGlobalDiscountPct(e.target.value)}
+                              placeholder="0%"
+                              className="w-14 rounded border px-1.5 py-0.5 text-right font-mono text-[11px] focus:outline-none"
+                              style={{
+                                borderColor: 'var(--border)',
+                                background: 'var(--surface-2)',
+                                color: 'var(--text)',
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={applyGlobalDiscountToAll}
+                              className="rounded px-2 py-0.5 text-[11px] font-bold transition"
+                              style={{
+                                background: 'var(--primary-soft)',
+                                color: 'var(--primary-ink)',
+                              }}
+                            >
+                              На всі
+                            </button>
+                          </div>
+                        )}
                         {isInventoryDoc && (
                           <button
                             type="button"
@@ -1273,6 +1354,9 @@ export function DocumentEditorModal({
                           {!isTransferDoc && !isProductionDoc && (
                             <th className="w-28 px-3 py-2 text-right">Ціна (₴)</th>
                           )}
+                          {hasDiscountSupport && (
+                            <th className="w-24 px-2 py-2 text-right">Знижка %</th>
+                          )}
                           {!isPriceDoc && !isTransferDoc && !isInventoryDoc && !isProductionDoc && (
                             <th className="w-32 px-3 py-2 text-right">Сума (₴)</th>
                           )}
@@ -1282,7 +1366,7 @@ export function DocumentEditorModal({
                       <tbody className="divide-y divide-slate-100">
                         {lines.length === 0 && (
                           <tr>
-                            <td colSpan={7} className="px-4 py-6 text-center text-xs text-slate-400">
+                            <td colSpan={hasDiscountSupport ? 8 : 7} className="px-4 py-6 text-center text-xs text-slate-400">
                               Скористайтеся рядком пошуку вище, щоб миттєво додати товари в документ
                             </td>
                           </tr>
@@ -1356,6 +1440,30 @@ export function DocumentEditorModal({
                                   />
                                 </td>
                               )}
+                              {hasDiscountSupport && (
+                                <td className="px-2 py-2">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    step="0.5"
+                                    value={line.discountPercent ?? 0}
+                                    onChange={(e) =>
+                                      updateLine(idx, { discountPercent: e.target.value })
+                                    }
+                                    aria-label={`Знижка у відсотках рядок ${idx + 1}`}
+                                    className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-right font-mono text-xs tabular-nums focus:border-indigo-500 focus:outline-none"
+                                  />
+                                  {Number(line.discountAmount || 0) > 0 && (
+                                    <div
+                                      className="mt-0.5 text-right font-mono text-[10px] font-semibold"
+                                      style={{ color: 'var(--neg-ink)' }}
+                                    >
+                                      −{fmtMoney(line.discountAmount, '')}
+                                    </div>
+                                  )}
+                                </td>
+                              )}
                               {!isPriceDoc &&
                                 !isTransferDoc &&
                                 !isInventoryDoc &&
@@ -1381,11 +1489,29 @@ export function DocumentEditorModal({
                   </div>
 
                   {!isPriceDoc && !isTransferDoc && !isInventoryDoc && !isProductionDoc && (
-                    <div className="flex justify-end text-sm font-bold text-slate-900">
-                      Разом по документу:{' '}
-                      <span className="ml-2 font-mono tabular-nums text-indigo-700">
-                        {fmtMoney(computedLinesTotal)}
-                      </span>
+                    <div className="flex flex-col items-end gap-1 text-sm">
+                      {hasDiscountSupport && computedDiscountTotal > 0 && (
+                        <>
+                          <div className="text-xs" style={{ color: 'var(--muted)' }}>
+                            Сума без знижки:{' '}
+                            <span className="ml-2 font-mono font-semibold tabular-nums">
+                              {fmtMoney(computedGrossSubtotal)}
+                            </span>
+                          </div>
+                          <div className="text-xs font-semibold" style={{ color: 'var(--neg-ink)' }}>
+                            Знижка по документу:{' '}
+                            <span className="ml-2 font-mono tabular-nums">
+                              −{fmtMoney(computedDiscountTotal)}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                      <div className="font-bold text-slate-900">
+                        Разом до сплати:{' '}
+                        <span className="ml-2 font-mono tabular-nums text-indigo-700">
+                          {fmtMoney(computedLinesTotal)}
+                        </span>
+                      </div>
                     </div>
                   )}
                 </div>

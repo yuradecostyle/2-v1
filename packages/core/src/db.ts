@@ -282,6 +282,7 @@ ALTER TABLE documents ADD COLUMN IF NOT EXISTS bom_spec_id UUID;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS vat_rate INTEGER NOT NULL DEFAULT 20;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'UAH';
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS exchange_rate NUMERIC(18, 6) NOT NULL DEFAULT 1.000000;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS discount_total NUMERIC(18, 2) NOT NULL DEFAULT 0.00;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS vat_amount NUMERIC(18, 2) NOT NULL DEFAULT 0.00;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS fiscal_receipt_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS fiscal_code TEXT NOT NULL DEFAULT '';
@@ -316,6 +317,8 @@ ALTER TABLE document_lines ADD COLUMN IF NOT EXISTS line_role TEXT NOT NULL DEFA
 ALTER TABLE document_lines ADD COLUMN IF NOT EXISTS employee_id UUID REFERENCES employees(id) ON DELETE SET NULL;
 ALTER TABLE document_lines ADD COLUMN IF NOT EXISTS book_qty NUMERIC(18, 4) NOT NULL DEFAULT 0.0000;
 ALTER TABLE document_lines ADD COLUMN IF NOT EXISTS diff_qty NUMERIC(18, 4) NOT NULL DEFAULT 0.0000;
+ALTER TABLE document_lines ADD COLUMN IF NOT EXISTS discount_percent NUMERIC(6, 2) NOT NULL DEFAULT 0.00;
+ALTER TABLE document_lines ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(18, 2) NOT NULL DEFAULT 0.00;
 ALTER TABLE document_lines ADD COLUMN IF NOT EXISTS tax_amount NUMERIC(18, 2) NOT NULL DEFAULT 0.00;
 ALTER TABLE document_lines ADD COLUMN IF NOT EXISTS debit_account_code TEXT NOT NULL DEFAULT '';
 ALTER TABLE document_lines ADD COLUMN IF NOT EXISTS credit_account_code TEXT NOT NULL DEFAULT '';
@@ -550,6 +553,29 @@ CREATE TABLE IF NOT EXISTS reg_currency_rates (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_fx_rates_code_date ON reg_currency_rates(currency_code, rate_date);
+
+CREATE TABLE IF NOT EXISTS print_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  template_key TEXT NOT NULL,
+  doc_type TEXT NOT NULL,
+  name TEXT NOT NULL,
+  standard_code TEXT NOT NULL DEFAULT '',
+  title_text TEXT NOT NULL,
+  subtitle_text TEXT NOT NULL DEFAULT '',
+  header_note TEXT NOT NULL DEFAULT '',
+  footer_note TEXT NOT NULL DEFAULT '',
+  sign_left_label TEXT NOT NULL DEFAULT 'Відпустив(ла)',
+  sign_right_label TEXT NOT NULL DEFAULT 'Отримав(ла)',
+  show_discount_column BOOLEAN NOT NULL DEFAULT TRUE,
+  show_vat_block BOOLEAN NOT NULL DEFAULT TRUE,
+  show_iban_block BOOLEAN NOT NULL DEFAULT TRUE,
+  show_stamp_area BOOLEAN NOT NULL DEFAULT TRUE,
+  show_sku_column BOOLEAN NOT NULL DEFAULT TRUE,
+  is_system BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_print_templates_org_key ON print_templates(organization_id, template_key);
 `;
 
 export async function createDatabase(options?: {

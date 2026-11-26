@@ -68,6 +68,9 @@ interface PublicDocumentResponse {
   } | null;
   cashflowCategoryName?: string;
   totals: {
+    subtotalBeforeDiscount?: string;
+    discountTotal?: string;
+    hasDiscount?: boolean;
     netAmount: string;
     vatRate: number;
     vatAmount: string;
@@ -82,6 +85,9 @@ interface PublicDocumentResponse {
     unit: string;
     qty: string;
     price: string;
+    grossLineAmount?: string;
+    discountPercent?: string;
+    discountAmount?: string;
     amount: string;
   }>;
 }
@@ -494,6 +500,9 @@ export function PublicDocumentPage({ token }: { token: string }) {
                         <th className="px-4 py-3 font-bold">Найменування</th>
                         <th className="px-4 py-3 text-right font-bold">К-сть</th>
                         <th className="px-4 py-3 text-right font-bold">Ціна</th>
+                        {totals.hasDiscount && (
+                          <th className="px-4 py-3 text-right font-bold">Знижка</th>
+                        )}
                         <th className="px-4 py-3 text-right font-bold">Сума</th>
                       </tr>
                     </thead>
@@ -522,6 +531,18 @@ export function PublicDocumentPage({ token }: { token: string }) {
                           <td className="px-4 py-3 text-right font-mono">
                             {fmtMoney(l.price)}
                           </td>
+                          {totals.hasDiscount && (
+                            <td className="px-4 py-3 text-right font-mono">
+                              {Number(l.discountPercent || 0) > 0 || Number(l.discountAmount || 0) > 0 ? (
+                                <span style={{ color: 'var(--neg-ink)' }}>
+                                  {Number(l.discountPercent || 0) > 0 ? `${fmtQty(l.discountPercent)}% · ` : ''}
+                                  −{fmtMoney(l.discountAmount || 0)}
+                                </span>
+                              ) : (
+                                <span style={{ color: 'var(--muted)' }}>—</span>
+                              )}
+                            </td>
+                          )}
                           <td
                             className="px-4 py-3 text-right font-mono font-bold"
                             style={{ color: 'var(--text)' }}
@@ -557,6 +578,11 @@ export function PublicDocumentPage({ token }: { token: string }) {
                           {fmtMoney(l.amount)}
                         </span>
                       </div>
+                      {(Number(l.discountPercent || 0) > 0 || Number(l.discountAmount || 0) > 0) && (
+                        <div className="mt-1 text-right font-mono text-[11px] font-semibold" style={{ color: 'var(--neg-ink)' }}>
+                          Знижка {Number(l.discountPercent || 0) > 0 ? `${fmtQty(l.discountPercent)}% ` : ''}(−{fmtMoney(l.discountAmount || 0)})
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -572,6 +598,20 @@ export function PublicDocumentPage({ token }: { token: string }) {
                 borderRadius: 'var(--r-md)',
               }}
             >
+              {totals.hasDiscount && (
+                <>
+                  <div className="flex items-center justify-between text-[13px]" style={{ color: 'var(--text-2)' }}>
+                    <span>Сума без знижки:</span>
+                    <span className="font-mono font-semibold">
+                      {fmtMoney(totals.subtotalBeforeDiscount)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[13px] font-semibold" style={{ color: 'var(--neg-ink)' }}>
+                    <span>Надана знижка:</span>
+                    <span className="font-mono">−{fmtMoney(totals.discountTotal)}</span>
+                  </div>
+                </>
+              )}
               {totals.vatRate > 0 && (
                 <div className="flex items-center justify-between text-[13px]" style={{ color: 'var(--text-2)' }}>
                   <span>Сума без ПДВ:</span>

@@ -13,6 +13,7 @@ import {
   Save,
 } from 'lucide-react';
 import { apiFetch, fmtDate, type BootstrapData } from '../lib/api';
+import { UniversalItemsImportModal } from '../components/UniversalItemsImportModal';
 
 const SAMPLE_ITEMS_CSV = `Артикул;Найменування;Од. вим.;Тип
 BAS-001;Маршрутизатор MikroTik hAP ax3;шт;Товар
@@ -77,6 +78,7 @@ export function ImportAndServicePage({ bootstrap }: { bootstrap: BootstrapData }
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [universalImportOpen, setUniversalImportOpen] = useState(false);
 
   const integrations = useQuery({
     queryKey: ['integrations'],
@@ -305,13 +307,27 @@ export function ImportAndServicePage({ bootstrap }: { bootstrap: BootstrapData }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-          Інтеграції (BAS OData, Банки, Checkbox ПРРО) та Сервіс
-        </h1>
-        <p className="mt-0.5 text-sm text-slate-500">
-          Кожен конектор працює в режимі DEMO (тест у 1 клік) або LIVE (пряме підключення за токенами)
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            Інтеграції (BAS OData, Банки, Checkbox ПРРО) та Сервіс
+          </h1>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Кожен конектор працює в режимі DEMO (тест у 1 клік) або LIVE (пряме підключення за токенами)
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setUniversalImportOpen(true)}
+          className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-extrabold shadow-xs transition"
+          style={{
+            background: 'linear-gradient(135deg, var(--primary), var(--primary-2))',
+            color: 'var(--surface)',
+          }}
+        >
+          <Upload className="h-4 w-4" />
+          <span>Імпорт номенклатури з PDF / XLS / CSV / XML</span>
+        </button>
       </div>
 
       {statusMsg && (
@@ -561,9 +577,24 @@ export function ImportAndServicePage({ bootstrap }: { bootstrap: BootstrapData }
       {/* CSV Importer + Service */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
-          <div className="flex items-center gap-2">
-            <Upload className="h-5 w-5 text-indigo-600" />
-            <h2 className="text-base font-semibold text-slate-900">Файловий імпорт із BAS (CSV)</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Upload className="h-5 w-5 text-indigo-600" />
+              <h2 className="text-base font-semibold text-slate-900">
+                Файловий імпорт (PDF / XLS / CSV / XML)
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => setUniversalImportOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold"
+              style={{
+                background: 'var(--primary-soft)',
+                color: 'var(--primary-ink)',
+              }}
+            >
+              <Upload className="h-3.5 w-3.5" /> Завантажити файл
+            </button>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -715,6 +746,21 @@ export function ImportAndServicePage({ bootstrap }: { bootstrap: BootstrapData }
           </div>
         </div>
       </div>
+
+      {universalImportOpen && (
+        <UniversalItemsImportModal
+          bootstrap={bootstrap}
+          onClose={() => setUniversalImportOpen(false)}
+          onImported={(res) => {
+            setStatusMsg(
+              `Універсальний імпорт завершено: створено ${res.created}, оновлено ${res.updated}, категорій +${res.categoriesCreated}${
+                res.priceDocNumber ? `, проведено прайс-лист №${res.priceDocNumber}` : ''
+              }.`
+            );
+            refreshAll();
+          }}
+        />
+      )}
     </div>
   );
 }
