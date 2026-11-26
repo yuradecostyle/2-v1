@@ -1,10 +1,37 @@
 # Інструкція встановлення 2С ERP (v1.0.0) новому клієнту
 
 Ця покрокова інструкція описує, як розгорнути базову версію **2С (v1.0.0)** для нового клієнта:
-- **Сценарій А:** Production-сервер (VPS Ubuntu 22.04 / 24.04 + PostgreSQL + Nginx + HTTPS + автозапуск `systemd`) — **рекомендовано для реальної роботи команди**.
-- **Сценарій Б:** Швидкий запуск на локальному комп’ютері / офісному ПК (без PostgreSQL — на вбудованій базі PGlite, за 3 хвилини).
+- **Сценарій 0 (найшвидший для VPS):** Docker Compose (`PostgreSQL 16 + Fastify API + Nginx Web`) + зовнішній reverse-proxy/SSL — **розгортання за 2 хвилини**.
+- **Сценарій А:** Класичний VPS (Ubuntu 22.04 / 24.04 + PostgreSQL + Nginx + HTTPS + `systemd`).
+- **Сценарій Б:** Швидкий запуск на локальному комп’ютері / офісному ПК (без PostgreSQL — на вбудованій базі PGlite).
 - **Розділ 3:** Чекліст первинного налаштування системи під бізнес клієнта.
 - **Розділ 4:** Резервне копіювання (бекапи) та оновлення версій.
+
+---
+
+## Сценарій 0: Швидке розгортання через Docker Compose (Рекомендовано)
+
+```bash
+# 1. Клонування базової версії v1.0.0
+git clone --branch v1.0.0 https://github.com/yuradecostyle/2-v1.git /opt/2c-client
+cd /opt/2c-client
+
+# 2. Налаштування .env (задайте надійні POSTGRES_PASSWORD та ADMIN_PASSWORD)
+cp .env.example .env
+nano .env
+
+# 3. Збірка та запуск контейнерів (PostgreSQL 16 + API + Nginx Web)
+docker compose up -d --build
+
+# 4. Перевірка здоров'я
+docker compose ps
+curl http://127.0.0.1:8088/api/health
+```
+
+Далі проксіюйте домен клієнта (наприклад, `baza.decostyle.lviv.ua`) у хостовому **Nginx / Caddy / Traefik** на `http://127.0.0.1:8088` з автоматичним SSL Let's Encrypt.
+
+> **Бекап БД у Docker:**
+> `docker compose exec -T db pg_dump -U erp2c erp2c | gzip > backup_$(date +%F).sql.gz`
 
 ---
 

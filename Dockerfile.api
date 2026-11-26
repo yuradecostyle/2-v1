@@ -1,0 +1,26 @@
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Copy workspace manifests first for layer caching
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/core/package.json packages/core/tsconfig.json ./packages/core/
+COPY apps/api/package.json apps/api/tsconfig.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+
+RUN npm ci --ignore-scripts
+
+# Copy source code for core & api
+COPY packages/core/src ./packages/core/src
+COPY apps/api/src ./apps/api/src
+
+# Verify TypeScript build for core & api
+RUN npm --workspace @bas-alt/core run build && npm --workspace @bas-alt/api run build
+
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=4000
+
+EXPOSE 4000
+
+CMD ["npm", "--workspace", "@bas-alt/api", "run", "start"]

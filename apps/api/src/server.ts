@@ -107,6 +107,7 @@ import {
 } from '@bas-alt/core';
 
 const PORT = Number(process.env.PORT ?? 4000);
+const HOST = process.env.HOST ?? '127.0.0.1';
 const DATA_DIR = process.env.PGLITE_DATA_DIR ?? path.resolve(process.cwd(), '../../data/pglite');
 
 mkdirSync(DATA_DIR, { recursive: true });
@@ -3711,5 +3712,5 @@ app.get('/api/statutory/unified-esv', async (req) => {
   return getUnifiedPayrollReport(db, { organizationId: orgId, ...q });
 });
 
-await app.listen({ port: PORT, host: '127.0.0.1' });
-console.log(`[BAS-Alt API v4] Running on http://127.0.0.1:${PORT} (db driver: ${dbHandle.driver})`);
+await app.listen({ port: PORT, host: HOST });
+console.log(`[2C API v1.0.0] Running on http://${HOST}:${PORT} (db driver: ${dbHandle.driver})`);
